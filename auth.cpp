@@ -1,6 +1,8 @@
-#include <unistd.h>
-
-#include <libconfig.h++>
+//
+// Copyright (c) 2022, Imanol-Mikel Barba Sabariego
+// All rights reserved.
+// 
+// Distributed under BSD 3-Clause License. See LICENSE.
 
 #include "telegram_recorder.hpp"
 

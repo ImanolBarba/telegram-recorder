@@ -1,3 +1,9 @@
+//
+// Copyright (c) 2022, Imanol-Mikel Barba Sabariego
+// All rights reserved.
+// 
+// Distributed under BSD 3-Clause License. See LICENSE.
+
 #include <unistd.h>
 
 #include <libconfig.h++>
@@ -30,6 +36,7 @@ void TelegramRecorder::start() {
         updatesAvailable = false;
         auto response = this->clientManager->receive(0);
         if(response.object) {
+          // TODO: Do this in new thread
           updatesAvailable = true;
           this->processResponse(std::move(response));
         }
@@ -60,6 +67,7 @@ bool TelegramRecorder::loadConfig() {
   }
 
   try {
+    // TODO: This sucks
     const int apiIDConfValue = cfg.lookup("api_id");
     const std::string apiHashConfValue = cfg.lookup("api_hash");
     const std::string firstNameConfValue = cfg.lookup("first_name");
@@ -150,6 +158,12 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
             }
           }
         );
+
+        // TODO: get user/chat details
+        // TODO: maintain user/cache LRU, falling back to SQL, falling back to TGAPI
+        // TODO: enqueue sql writes
+        // TODO: mark as read, mimic human behaviour
+
         std::cout << "Got message: [chat_id:" << updateNewMessage.message_->chat_id_
                   << "] [from:" << senderID << "] [" << text << "]"
                   << std::endl;

@@ -1,3 +1,9 @@
+//
+// Copyright (c) 2022, Imanol-Mikel Barba Sabariego
+// All rights reserved.
+// 
+// Distributed under BSD 3-Clause License. See LICENSE.
+
 #include <functional>
 #include <iostream>
 #include <map>

@@ -8,10 +8,11 @@
 
 #include "telegram_recorder.hpp"
 
-// TODO: Mark as read, simulate human behaviour
-// TODO: Create sqlite db
-
 int main(int argc, char** argv) {
   TelegramRecorder recorder;
+  // TODO: start new thread
   recorder.start();
+
+  // TODO: Implement basic interactive mode
+  // TODO: Graceful shutdown
 }
