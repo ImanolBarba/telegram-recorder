@@ -5,6 +5,6 @@ project(TelegramRecorder VERSION 1.0 LANGUAGES CXX)
 add_subdirectory(td)
 find_library(libconfig libconfig)
 
-add_executable(tgrec main.cpp)
+add_executable(tgrec main.cpp telegram_recorder.cpp auth.cpp)
 target_link_libraries(tgrec PRIVATE Td::TdStatic config++)
 set_property(TARGET tgrec PROPERTY CXX_STANDARD 17)
