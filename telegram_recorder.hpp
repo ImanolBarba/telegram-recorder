@@ -4,16 +4,18 @@
 // 
 // Distributed under BSD 3-Clause License. See LICENSE.
 
+#ifndef TELEGRAM_RECORDER_HPP
+#define TELEGRAM_RECORDER_HPP
+
+#include <atomic>
 #include <functional>
 #include <iostream>
 #include <map>
+#include <mutex>
 
 #include <td/telegram/td_api.hpp>
 #include <td/telegram/Client.h>
 #include <td/telegram/td_api.h>
-
-#ifndef TELEGRAM_RECORDER_HPP
-#define TELEGRAM_RECORDER_HPP
 
 namespace td_api = td::td_api;
 
@@ -30,20 +32,7 @@ class TelegramRecorder {
     void stop();
 
  private:
-  std::unique_ptr<td::ClientManager> clientManager;
-  std::int32_t clientID{0};
-  td_api::object_ptr<td_api::AuthorizationState> authState;
-  bool authorized{false};
-  bool needRestart{false};
-  std::uint64_t currentQueryID{0};
-  std::uint64_t authQueryID{0};
-  std::map<std::uint64_t, std::function<void(TDAPIObjectPtr)>> handlers;
-  bool exitFlag{false};
-  int apiID;
-  std::string apiHash;
-  std::string firstName;
-  std::string lastName;
-
+ void runRecorder();
   bool loadConfig();
   void restart();
   void sendQuery(
@@ -55,6 +44,25 @@ class TelegramRecorder {
   auto createAuthQueryHandler();
   void onAuthStateUpdate();
   void checkAuthError(TDAPIObjectPtr object);
+  void enqueue(std::shared_ptr<td_api::message>& message);
+  void runMessageReader();
+  void markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID);
+
+  std::unique_ptr<td::ClientManager> clientManager;
+  std::int32_t clientID{0};
+  td_api::object_ptr<td_api::AuthorizationState> authState;
+  bool authorized{false};
+  bool needRestart{false};
+  std::uint64_t currentQueryID{0};
+  std::uint64_t authQueryID{0};
+  std::map<std::uint64_t, std::function<void(TDAPIObjectPtr)>> handlers;
+  std::atomic<bool> exitFlag{false};
+  int apiID;
+  std::string apiHash;
+  std::string firstName;
+  std::string lastName;
+  std::map<td_api::int53, std::vector<std::shared_ptr<td_api::message>>> toReadMessageQueue;
+  std::mutex queueMutex;  
 };
 
 #endif

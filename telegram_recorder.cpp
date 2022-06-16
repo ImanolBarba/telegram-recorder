@@ -4,6 +4,8 @@
 // 
 // Distributed under BSD 3-Clause License. See LICENSE.
 
+#include <thread>
+
 #include <unistd.h>
 
 #include <libconfig.h++>
@@ -12,6 +14,15 @@
 
 #define DEFAULT_CONFIG_FILE "tgrec.conf"
 
+// Return types from the client come as an equivalent of unique_ptr, we need to
+// convert those to shared_ptr since we are enqueuing the objects in two
+// different threads (dbwriter, msgreader)
+template<class T>
+std::shared_ptr<T> mkshared(td_api::object_ptr<T>& ptr) {
+    std::shared_ptr<T> shared(ptr.release());
+    return shared;
+}
+
 TelegramRecorder::TelegramRecorder() {
     td::ClientManager::execute(td_api::make_object<td_api::setLogVerbosityLevel>(2));
     this->clientManager = std::make_unique<td::ClientManager>();
@@ -19,18 +30,24 @@ TelegramRecorder::TelegramRecorder() {
 }
 
 void TelegramRecorder::start() {
+  std::thread recorderThread(&TelegramRecorder::runRecorder, this);
+  recorderThread.detach();
+  std::thread readerThread(&TelegramRecorder::runMessageReader, this);
+  readerThread.detach();
+} 
+
+void TelegramRecorder::runRecorder() {
   if(!this->loadConfig()) {
     std::cerr << "Unable to load configuration file" << std::endl;
     return;
   }
   this->sendQuery(td_api::make_object<td_api::getOption>("version"), {});
-  while(!this->exitFlag) {
+  while(!this->exitFlag.load()) {
     if (this->needRestart) {
       this->restart();
     } else if (!this->authorized) {
       this->processResponse(this->clientManager->receive(10));
     } else {
-      std::cout << "Checking for updates..." << std::endl;
       bool updatesAvailable = false;
       do {
         updatesAvailable = false;
@@ -88,7 +105,15 @@ bool TelegramRecorder::loadConfig() {
 
 void TelegramRecorder::restart() {
   this->clientManager.reset();
-  *this = TelegramRecorder();
+  this->clientManager = std::make_unique<td::ClientManager>();
+  this->clientID = this->clientManager->create_client_id();
+  this->authorized = false;
+  this->needRestart = false;
+  this->currentQueryID = 0;
+  this->authQueryID = 0;
+  this->handlers.clear();
+  this->toReadMessageQueue.clear();
+  this->sendQuery(td_api::make_object<td_api::getOption>("version"), {});
 }
 
 void TelegramRecorder::sendQuery(
@@ -142,14 +167,15 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
       [this](td_api::updateNewMessage& updateNewMessage) {
         // A new message was received
         std::string text;
-        if (updateNewMessage.message_->content_->get_id() == td_api::messageText::ID) {
+        std::shared_ptr<td_api::message> message = mkshared(updateNewMessage.message_);
+        if (message->content_->get_id() == td_api::messageText::ID) {
           text = static_cast<td_api::messageText&>(
-            *updateNewMessage.message_->content_
+            *message->content_
           ).text_->text_;
         }
         td_api::int53 senderID;
-        td_api::downcast_call(*updateNewMessage.message_->sender_id_,
-          overload{
+        td_api::downcast_call(*message->sender_id_,
+          overload {
             [this, &senderID](td_api::messageSenderUser &user) {
               senderID = user.user_id_;
             },
@@ -162,11 +188,11 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
         // TODO: get user/chat details
         // TODO: maintain user/cache LRU, falling back to SQL, falling back to TGAPI
         // TODO: enqueue sql writes
-        // TODO: mark as read, mimic human behaviour
 
-        std::cout << "Got message: [chat_id:" << updateNewMessage.message_->chat_id_
+        std::cout << "Got message: [chat_id:" << message->chat_id_
                   << "] [from:" << senderID << "] [" << text << "]"
                   << std::endl;
+        this->enqueue(message);
       },
       [](auto& update) {}
     }
