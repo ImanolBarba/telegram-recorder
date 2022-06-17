@@ -4,6 +4,9 @@
 // 
 // Distributed under BSD 3-Clause License. See LICENSE.
 
+#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+#include <spdlog/spdlog.h>
+
 #include "telegram_recorder.hpp"
 
 auto TelegramRecorder::createAuthQueryHandler() {
@@ -21,19 +24,19 @@ void TelegramRecorder::onAuthStateUpdate() {
     overload {
       [this](td_api::authorizationStateReady&) {
         this->authorized = true;
-        std::cout << "Got authorization" << std::endl;
+        SPDLOG_INFO("Got authorization");
       },
       [this](td_api::authorizationStateLoggingOut&) {
         this->authorized = false;
-        std::cout << "Logging out" << std::endl;
+        SPDLOG_INFO("Logging out");
       },
       [this](td_api::authorizationStateClosing&) {
-        std::cout << "Closing" << std::endl;
+        SPDLOG_INFO("Closing");
       },
       [this](td_api::authorizationStateClosed&) {
         this->authorized = false;
         this->needRestart = true;
-        std::cout << "Terminated (Needs restart)" << std::endl;
+        SPDLOG_WARN("Authorisation terminated");
       },
       [this](td_api::authorizationStateWaitCode&) {
         std::cout << "Enter authentication code: " << std::flush;
@@ -106,7 +109,7 @@ void TelegramRecorder::onAuthStateUpdate() {
 void TelegramRecorder::checkAuthError(TDAPIObjectPtr object) {
   if (object->get_id() == td_api::error::ID) {
     auto error = td::move_tl_object_as<td_api::error>(object);
-    std::cout << "Error: " << to_string(error) << std::flush;
+    SPDLOG_ERROR("Authorisation Error: {}", to_string(error));
     this->onAuthStateUpdate();
   }
 }

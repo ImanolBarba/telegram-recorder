@@ -9,6 +9,8 @@
 #include <unistd.h>
 
 #include <libconfig.h++>
+#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+#include <spdlog/spdlog.h>
 
 #include "telegram_recorder.hpp"
 
@@ -37,8 +39,9 @@ void TelegramRecorder::start() {
 } 
 
 void TelegramRecorder::runRecorder() {
+  SPDLOG_DEBUG("Recorder thread started");
   if(!this->loadConfig()) {
-    std::cerr << "Unable to load configuration file" << std::endl;
+    SPDLOG_ERROR("Unable to load configuration file");
     return;
   }
   this->sendQuery(td_api::make_object<td_api::getOption>("version"), {});
@@ -61,6 +64,7 @@ void TelegramRecorder::runRecorder() {
       sleep(1);
     }
   }
+  SPDLOG_DEBUG("Recorder stopped");
   this->sendQuery(td_api::make_object<td_api::logOut>(), {});
   this->sendQuery(td_api::make_object<td_api::close>(), {});
 }
@@ -75,11 +79,10 @@ bool TelegramRecorder::loadConfig() {
   try {
     cfg.readFile(DEFAULT_CONFIG_FILE);
   } catch(const libconfig::FileIOException &fioex) {
-    std::cerr << "I/O error while reading file." << std::endl;
+    SPDLOG_ERROR("I/O error while reading config file");
     return false;
   } catch(const libconfig::ParseException &pex) {
-    std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
-              << " - " << pex.getError() << std::endl;
+    SPDLOG_ERROR("Parse error at {}:{} - {}", pex.getFile(), pex.getLine(), pex.getError());
     return false;
   }
 
@@ -94,16 +97,17 @@ bool TelegramRecorder::loadConfig() {
     this->firstName = firstNameConfValue;
     this->lastName = lastNameConfValue;
   } catch(const libconfig::SettingNotFoundException &nfex) {
-    std::cerr << "Missing configuration parameters" << std::endl;
+    SPDLOG_ERROR("Missing configuration parameters");
     return false;
   } catch(const libconfig::SettingTypeException &stex) {
-    std::cerr << "Malformed config found" << std::endl;
+    SPDLOG_ERROR("Malformed config found");
     return false;
   }
   return true;
 }
 
 void TelegramRecorder::restart() {
+  SPDLOG_INFO("Restarting recorder");
   this->clientManager.reset();
   this->clientManager = std::make_unique<td::ClientManager>();
   this->clientID = this->clientManager->create_client_id();
@@ -121,6 +125,7 @@ void TelegramRecorder::sendQuery(
   std::function<void(TDAPIObjectPtr)> handler
 ) {
   ++this->currentQueryID;
+  SPDLOG_DEBUG("Sending query type {} with ID {}", func->get_id(), this->currentQueryID);
   if(handler) {
     this->handlers.emplace(this->currentQueryID, std::move(handler));
   }
@@ -134,6 +139,7 @@ void TelegramRecorder::processResponse(td::ClientManager::Response response) {
       this->processUpdate(std::move(response.object));
       return;
     }
+    SPDLOG_DEBUG("Processing response for request ID {}", response.request_id);
     auto it = this->handlers.find(response.request_id);
     if(it != this->handlers.end()) {
       // if a handler is found for the request ID, call it!
@@ -144,6 +150,7 @@ void TelegramRecorder::processResponse(td::ClientManager::Response response) {
 }
 
 void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
+  SPDLOG_DEBUG("Processing Telegram update type {}", update->get_id());
   td_api::downcast_call(
     *update,
     overload {
@@ -189,9 +196,7 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
         // TODO: maintain user/cache LRU, falling back to SQL, falling back to TGAPI
         // TODO: enqueue sql writes
 
-        std::cout << "Got message: [chat_id:" << message->chat_id_
-                  << "] [from:" << senderID << "] [" << text << "]"
-                  << std::endl;
+        SPDLOG_INFO("Got message: [chat_id: {}] [from: {}]: {}", message->chat_id_, senderID, text);
         this->enqueue(message);
       },
       [](auto& update) {}

@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+#include <spdlog/spdlog.h>
+
 #include "telegram_recorder.hpp"
 
 // TODO: Add human activity parameters to config file
@@ -26,25 +29,21 @@ double getMessageReadTime(std::shared_ptr<td_api::message>& message) {
 }
 
 void TelegramRecorder::runMessageReader() {
+  SPDLOG_DEBUG("Reader thread started");
   std::random_device rd;
   std::default_random_engine generator(rd());
   std::normal_distribution<> distribution(600, 200);
   while(!this->exitFlag.load()) {
-    // TODO: Uncomment me
-    /*
     double nextActivityPeriod = distribution(generator);
     if(nextActivityPeriod < 10.0) {
       nextActivityPeriod = 10.0;
     }
-    */
-    double nextActivityPeriod = 1.0;
-    std::cerr << "Waiting " << nextActivityPeriod << " seconds until reading messages..." << std::endl;
+    SPDLOG_DEBUG("Waiting {:0.3f} seconds until reading messages...", nextActivityPeriod);
     std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(nextActivityPeriod * 1000)));
-    std::cerr << "Reading messages..." << std::endl;
+    SPDLOG_INFO("Reading messages...");
     while(this->toReadMessageQueue.size()) {
       this->queueMutex.lock();
       std::vector<td_api::int53> chats;
-      std::cerr << "Chats: ";
       for(auto it = this->toReadMessageQueue.begin(); it != this->toReadMessageQueue.end(); ++it) {
         std::cerr << it->first << " ";
         chats.push_back(it->first);
@@ -52,7 +51,6 @@ void TelegramRecorder::runMessageReader() {
       std::cerr << std::endl;
       this->queueMutex.unlock();
       for(td_api::int53& chat : chats) {
-        std::cerr << "Reading all messages from chat " << chat << std::endl;
         this->queueMutex.lock();
         td_api::object_ptr<td::td_api::openChat> openChat = td_api::make_object<td_api::openChat>();
         openChat->chat_id_ = chat;
@@ -60,7 +58,6 @@ void TelegramRecorder::runMessageReader() {
         for(auto& message : this->toReadMessageQueue[chat]) {
           double timeToRead = getMessageReadTime(message);
           this->markMessageAsRead(chat, message->id_);
-          std::cerr << "Read message " << message->id_ << std::endl;
           std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(timeToRead * 1000)));
         }
         td_api::object_ptr<td::td_api::closeChat> closeChat = td_api::make_object<td_api::closeChat>();
@@ -70,12 +67,13 @@ void TelegramRecorder::runMessageReader() {
         this->queueMutex.unlock();
       }
     }
-    std::cerr << "Going to sleep..." << std::endl;
+    SPDLOG_INFO("Finished reading messages!");
   }
 }
 
 void TelegramRecorder::enqueue(std::shared_ptr<td_api::message>& message) {
   this->queueMutex.lock();
+  SPDLOG_DEBUG("Enqueueing message {} from chat {}", message->id_, message->chat_id_);
   if(this->toReadMessageQueue.find(message->chat_id_) == this->toReadMessageQueue.end()) {
     this->toReadMessageQueue[message->chat_id_] = std::vector<std::shared_ptr<td_api::message>>();
   }
@@ -84,6 +82,7 @@ void TelegramRecorder::enqueue(std::shared_ptr<td_api::message>& message) {
 }
 
 void TelegramRecorder::markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID) {
+  SPDLOG_DEBUG("Marking message {} from chat {} as read", messageID, chatID);
   td_api::object_ptr<td::td_api::viewMessages> viewMessages = td_api::make_object<td_api::viewMessages>();
   viewMessages->chat_id_ = chatID;
   // Message thread IDs are conversations that happen in certain channel's posts (the ones that allow it).
