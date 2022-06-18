@@ -9,6 +9,7 @@
 #include <thread>
 
 #include <getopt.h>
+#include <semaphore.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -21,9 +22,10 @@
 
 #define VERSION "1.0"
 
-namespace {
-  volatile sig_atomic_t exitFlag;
-}
+volatile sig_atomic_t signalReceived = 0;
+
+// Semaphores are one of the few appropriate sync mechanisms that are async-signal-safe
+sem_t signalSemaphore;
 
 static struct option longopts[] = {
     { "verbose",  no_argument,  NULL, 'v'},
@@ -33,7 +35,8 @@ static struct option longopts[] = {
 };
 
 void signalHandler(int signal) {
-  exitFlag = signal;
+  signalReceived = signal;
+  sem_post(&signalSemaphore);
 }
 
 void printVersion(const char* argv) {
@@ -50,17 +53,22 @@ void printHelp(const char* argv, bool longVersion = true) {
 }
 
 int main(int argc, char** argv) {
+  // info - 2022-06-18 00:58:54 +01:00 [main.cpp:105 main() TID:156399] whatever
+  spdlog::set_pattern("%l - %Y-%m-%d %H:%M:%S %z [%s:%# %!() TID:%t] %^%v%$");
+  spdlog::sinks::daily_file_sink_mt* fileSink = new spdlog::sinks::daily_file_sink_mt("tgrec.log", 0, 0);
+  spdlog::default_logger_raw()->sinks().push_back(std::shared_ptr<spdlog::sinks::daily_file_sink_mt>(fileSink));
+
+  if (sem_init(&signalSemaphore, 0, 0)) {
+    SPDLOG_ERROR("Unable to initialise semaphore: {}", std::strerror(errno));
+    return 1;
+  }
+
   struct sigaction newAction;
   newAction.sa_handler = signalHandler;
   sigemptyset(&newAction.sa_mask);
   newAction.sa_flags = 0;
   sigaction(SIGINT, &newAction, NULL);
   sigaction(SIGTERM, &newAction, NULL);
-
-  // INFO - 2022-06-16 19:15:43,006 [bot.py:251 doRelist() TID:140272650397440] whatever
-  spdlog::set_pattern("%l - %Y-%m-%d %H:%M:%S %z [%s:%# %!() TID:%t] %^%v%$");
-  spdlog::sinks::daily_file_sink_mt* fileSink = new spdlog::sinks::daily_file_sink_mt("tgrec.log", 0, 0);
-  spdlog::default_logger_raw()->sinks().push_back(std::shared_ptr<spdlog::sinks::daily_file_sink_mt>(fileSink));
 
   int longIndex = 0;
   int c;
@@ -91,12 +99,25 @@ int main(int argc, char** argv) {
   TelegramRecorder recorder;
   recorder.start();
 
-  while(!exitFlag) {
-    sleep(1);
+  while(true) {
+    if(sem_wait(&signalSemaphore)) {
+      if(errno != EINTR) {
+        // EINTR will be triggered when receiving a signal, so if not that, it's bad
+        SPDLOG_ERROR("Error waiting for signal semaphore: {}", std::strerror(errno));
+        return 1;
+      }
+    } else {
+      break;
+    }
   }
 
-  if(exitFlag != 1) {
-    SPDLOG_INFO("Caught signal {}", exitFlag);
+  if(sem_destroy(&signalSemaphore)) {
+    SPDLOG_ERROR("Error destroying signal semaphore: {}", std::strerror(errno));
+    return 1;
+  }
+
+  if(signalReceived) {
+    SPDLOG_INFO("Caught signal {}", signalReceived);
   }
 
   SPDLOG_INFO("Stopping Telegram Recorder...");
