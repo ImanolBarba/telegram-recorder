@@ -17,6 +17,8 @@
 #include <td/telegram/Client.h>
 #include <td/telegram/td_api.h>
 
+#include "config.hpp"
+
 namespace td_api = td::td_api;
 
 using TDAPIObjectPtr = td_api::object_ptr<td_api::Object>;
@@ -24,22 +26,6 @@ using TDAPIObjectPtr = td_api::object_ptr<td_api::Object>;
 // C++17 overload pattern
 template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 template<class... Ts> overload(Ts...) -> overload<Ts...>;
-
-typedef struct HumanBehaviourParams {
-  double readMsgFrequencyMean;
-  double readMsgFrequencyStdDev;
-  double readMsgMinWaitSec;
-  double textReadSpeedWPM;
-  double photoReadSpeedSec;
-} HumanBehaviourParams;
-
-typedef struct ConfigParams {
-  int apiID;
-  std::string apiHash;
-  std::string firstName;
-  std::string lastName;
-  HumanBehaviourParams humanParams;
-} ConfigParams;
 
 class TelegramRecorder {
   public:
