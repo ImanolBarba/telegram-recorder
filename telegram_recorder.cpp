@@ -32,6 +32,10 @@ TelegramRecorder::TelegramRecorder() {
 }
 
 void TelegramRecorder::start() {
+   if(!this->loadConfig()) {
+    SPDLOG_ERROR("Unable to load configuration file");
+    return;
+  }
   std::thread recorderThread(&TelegramRecorder::runRecorder, this);
   recorderThread.detach();
   std::thread readerThread(&TelegramRecorder::runMessageReader, this);
@@ -40,10 +44,6 @@ void TelegramRecorder::start() {
 
 void TelegramRecorder::runRecorder() {
   SPDLOG_DEBUG("Recorder thread started");
-  if(!this->loadConfig()) {
-    SPDLOG_ERROR("Unable to load configuration file");
-    return;
-  }
   this->sendQuery(td_api::make_object<td_api::getOption>("version"), {});
   while(!this->exitFlag.load()) {
     if (this->needRestart) {
@@ -75,7 +75,7 @@ void TelegramRecorder::stop() {
 
 bool TelegramRecorder::loadConfig() {
   libconfig::Config cfg;
-  
+
   try {
     cfg.readFile(DEFAULT_CONFIG_FILE);
   } catch(const libconfig::FileIOException &fioex) {
@@ -87,20 +87,24 @@ bool TelegramRecorder::loadConfig() {
   }
 
   try {
-    // TODO: This sucks
-    const int apiIDConfValue = cfg.lookup("api_id");
-    const std::string apiHashConfValue = cfg.lookup("api_hash");
-    const std::string firstNameConfValue = cfg.lookup("first_name");
-    const std::string lastNameConfValue = cfg.lookup("last_name");
-    this->apiID = apiIDConfValue;
-    this->apiHash = apiHashConfValue;
-    this->firstName = firstNameConfValue;
-    this->lastName = lastNameConfValue;
+    this->config = {
+      std::move(cfg.lookup("api_id")),
+      std::move(cfg.lookup("api_hash")),
+      std::move(cfg.lookup("first_name")),
+      std::move(cfg.lookup("first_name")),
+      {
+        std::move(cfg.lookup("read_msg_frequency_mean")),
+        std::move(cfg.lookup("read_msg_frequency_std_dev")),
+        std::move(cfg.lookup("read_msg_min_wait_sec")),
+        std::move(cfg.lookup("text_read_speed_wpm")),
+        std::move(cfg.lookup("photo_read_speed_sec"))
+      }
+    };
   } catch(const libconfig::SettingNotFoundException &nfex) {
-    SPDLOG_ERROR("Missing configuration parameters");
+    SPDLOG_ERROR("Missing configuration parameters: {}", nfex.getPath());
     return false;
   } catch(const libconfig::SettingTypeException &stex) {
-    SPDLOG_ERROR("Malformed config found");
+    SPDLOG_ERROR("Malformed config found: {}", stex.getPath());
     return false;
   }
   return true;

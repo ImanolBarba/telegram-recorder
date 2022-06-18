@@ -49,7 +49,7 @@ void TelegramRecorder::onAuthStateUpdate() {
       },
       [this](td_api::authorizationStateWaitRegistration &) {
         this->sendQuery(
-          td_api::make_object<td_api::registerUser>(this->firstName, this->lastName),
+          td_api::make_object<td_api::registerUser>(this->config.firstName, this->config.lastName),
           this->createAuthQueryHandler()
         );
       },
@@ -91,8 +91,8 @@ void TelegramRecorder::onAuthStateUpdate() {
         params->database_directory_ = "tdlib";
         params->use_message_database_ = true;
         params->use_secret_chats_ = true;
-        params->api_id_ = this->apiID;
-        params->api_hash_ = this->apiHash;
+        params->api_id_ = this->config.apiID;
+        params->api_hash_ = this->config.apiHash;
         params->system_language_code_ = "en";
         params->device_model_ = "Desktop";
         params->application_version_ = "1.0";

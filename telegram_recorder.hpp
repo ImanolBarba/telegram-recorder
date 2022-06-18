@@ -25,6 +25,22 @@ using TDAPIObjectPtr = td_api::object_ptr<td_api::Object>;
 template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 template<class... Ts> overload(Ts...) -> overload<Ts...>;
 
+typedef struct HumanBehaviourParams {
+  double readMsgFrequencyMean;
+  double readMsgFrequencyStdDev;
+  double readMsgMinWaitSec;
+  double textReadSpeedWPM;
+  double photoReadSpeedSec;
+} HumanBehaviourParams;
+
+typedef struct ConfigParams {
+  int apiID;
+  std::string apiHash;
+  std::string firstName;
+  std::string lastName;
+  HumanBehaviourParams humanParams;
+} ConfigParams;
+
 class TelegramRecorder {
   public:
     TelegramRecorder();
@@ -57,12 +73,9 @@ class TelegramRecorder {
   std::uint64_t authQueryID{0};
   std::map<std::uint64_t, std::function<void(TDAPIObjectPtr)>> handlers;
   std::atomic<bool> exitFlag{false};
-  int apiID;
-  std::string apiHash;
-  std::string firstName;
-  std::string lastName;
   std::map<td_api::int53, std::vector<std::shared_ptr<td_api::message>>> toReadMessageQueue;
-  std::mutex queueMutex;  
+  std::mutex queueMutex;
+  ConfigParams config;
 };
 
 #endif

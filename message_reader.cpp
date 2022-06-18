@@ -17,9 +17,8 @@
 
 #include "telegram_recorder.hpp"
 
-// TODO: Add human activity parameters to config file
-
 double getMessageReadTime(std::shared_ptr<td_api::message>& message) {
+  // TODO
   // get message type
   // get message params according to type
   // if text: 250 wpm
@@ -32,11 +31,14 @@ void TelegramRecorder::runMessageReader() {
   SPDLOG_DEBUG("Reader thread started");
   std::random_device rd;
   std::default_random_engine generator(rd());
-  std::normal_distribution<> distribution(600, 200);
+  std::normal_distribution<double> distribution(
+    this->config.humanParams.readMsgFrequencyMean,
+    this->config.humanParams.readMsgFrequencyStdDev
+  );
   while(!this->exitFlag.load()) {
     double nextActivityPeriod = distribution(generator);
-    if(nextActivityPeriod < 10.0) {
-      nextActivityPeriod = 10.0;
+    if(nextActivityPeriod < this->config.humanParams.readMsgMinWaitSec) {
+      nextActivityPeriod = this->config.humanParams.readMsgMinWaitSec;
     }
     SPDLOG_DEBUG("Waiting {:0.3f} seconds until reading messages...", nextActivityPeriod);
     std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(nextActivityPeriod * 1000)));
