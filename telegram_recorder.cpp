@@ -37,6 +37,8 @@ void TelegramRecorder::start() {
   recorderThread.detach();
   std::thread readerThread(&TelegramRecorder::runMessageReader, this);
   readerThread.detach();
+  std::thread writerThread(&TelegramRecorder::runDBWriter, this);
+  writerThread.detach();
 } 
 
 void TelegramRecorder::runRecorder() {
@@ -53,7 +55,6 @@ void TelegramRecorder::runRecorder() {
         updatesAvailable = false;
         auto response = this->clientManager->receive(0);
         if(response.object) {
-          // TODO: Do this in new thread
           updatesAvailable = true;
           this->processResponse(std::move(response));
         }
@@ -68,6 +69,7 @@ void TelegramRecorder::runRecorder() {
 
 void TelegramRecorder::stop() {
   this->exitFlag = true;
+  this->messagesAvailableToWrite.notify_all();
 }
 
 void TelegramRecorder::restart() {
@@ -137,31 +139,13 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
       },
       [this](td_api::updateNewMessage& updateNewMessage) {
         // A new message was received
-        std::string text;
         std::shared_ptr<td_api::message> message = mkshared(updateNewMessage.message_);
-        if (message->content_->get_id() == td_api::messageText::ID) {
-          text = static_cast<td_api::messageText&>(
-            *message->content_
-          ).text_->text_;
-        }
-        td_api::int53 senderID;
-        td_api::downcast_call(*message->sender_id_,
-          overload {
-            [this, &senderID](td_api::messageSenderUser &user) {
-              senderID = user.user_id_;
-            },
-            [this, &senderID](td_api::messageSenderChat &chat) {
-              senderID = chat.chat_id_;
-            }
-          }
-        );
 
         // TODO: get user/chat details
         // TODO: maintain user/cache LRU, falling back to SQL, falling back to TGAPI
-        // TODO: enqueue sql writes
 
-        SPDLOG_INFO("Got message: [chat_id: {}] [from: {}]: {}", message->chat_id_, senderID, text);
-        this->enqueue(message);
+        this->enqueueMessageToRead(message);
+        this->enqueueMessageToWrite(message);
       },
       [](auto& update) {}
     }

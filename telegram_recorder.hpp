@@ -13,6 +13,7 @@
 #include <map>
 #include <mutex>
 
+#include <sqlite3.h>
 #include <td/telegram/td_api.hpp>
 #include <td/telegram/Client.h>
 #include <td/telegram/td_api.h>
@@ -46,9 +47,13 @@ class TelegramRecorder {
   auto createAuthQueryHandler();
   void onAuthStateUpdate();
   void checkAuthError(TDAPIObjectPtr object);
-  void enqueue(std::shared_ptr<td_api::message>& message);
+  void enqueueMessageToRead(std::shared_ptr<td_api::message>& message);
+  void enqueueMessageToWrite(std::shared_ptr<td_api::message>& message);
   void runMessageReader();
   void markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID);
+  bool writeMessageToDB(std::shared_ptr<td_api::message>& message);
+  void runDBWriter();
+  bool initDB();
 
   std::unique_ptr<td::ClientManager> clientManager;
   std::int32_t clientID{0};
@@ -60,8 +65,12 @@ class TelegramRecorder {
   std::map<std::uint64_t, std::function<void(TDAPIObjectPtr)>> handlers;
   std::atomic<bool> exitFlag{false};
   std::map<td_api::int53, std::vector<std::shared_ptr<td_api::message>>> toReadMessageQueue;
-  std::mutex queueMutex;
+  std::map<td_api::int53, std::vector<std::shared_ptr<td_api::message>>> toWriteMessageQueue;
+  std::mutex toReadQueueMutex;
+  std::mutex toWriteQueueMutex;
+  std::condition_variable messagesAvailableToWrite;
   ConfigParams config;
+  sqlite3 *db;
 };
 
 #endif

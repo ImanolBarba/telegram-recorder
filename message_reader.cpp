@@ -44,16 +44,16 @@ void TelegramRecorder::runMessageReader() {
     std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(nextActivityPeriod * 1000)));
     SPDLOG_INFO("Reading messages...");
     while(this->toReadMessageQueue.size()) {
-      this->queueMutex.lock();
+      this->toReadQueueMutex.lock();
       std::vector<td_api::int53> chats;
       for(auto it = this->toReadMessageQueue.begin(); it != this->toReadMessageQueue.end(); ++it) {
         std::cerr << it->first << " ";
         chats.push_back(it->first);
       }
       std::cerr << std::endl;
-      this->queueMutex.unlock();
+      this->toReadQueueMutex.unlock();
       for(td_api::int53& chat : chats) {
-        this->queueMutex.lock();
+        this->toReadQueueMutex.lock();
         td_api::object_ptr<td::td_api::openChat> openChat = td_api::make_object<td_api::openChat>();
         openChat->chat_id_ = chat;
         this->sendQuery(std::move(openChat), {});
@@ -66,21 +66,21 @@ void TelegramRecorder::runMessageReader() {
         closeChat->chat_id_ = chat;
         this->sendQuery(std::move(closeChat), {});
         this->toReadMessageQueue.erase(chat);
-        this->queueMutex.unlock();
+        this->toReadQueueMutex.unlock();
       }
     }
     SPDLOG_INFO("Finished reading messages!");
   }
 }
 
-void TelegramRecorder::enqueue(std::shared_ptr<td_api::message>& message) {
-  this->queueMutex.lock();
+void TelegramRecorder::enqueueMessageToRead(std::shared_ptr<td_api::message>& message) {
+  this->toReadQueueMutex.lock();
   SPDLOG_DEBUG("Enqueueing message {} from chat {}", message->id_, message->chat_id_);
   if(this->toReadMessageQueue.find(message->chat_id_) == this->toReadMessageQueue.end()) {
     this->toReadMessageQueue[message->chat_id_] = std::vector<std::shared_ptr<td_api::message>>();
   }
   this->toReadMessageQueue[message->chat_id_].push_back(message);
-  this->queueMutex.unlock();
+  this->toReadQueueMutex.unlock();
 }
 
 void TelegramRecorder::markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID) {

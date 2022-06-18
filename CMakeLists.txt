@@ -7,6 +7,6 @@ find_package(spdlog REQUIRED)
 find_library(config++ config++)
 find_library(fmt fmt)
 
-add_executable(tgrec main.cpp telegram_recorder.cpp auth.cpp message_reader.cpp config.cpp)
+add_executable(tgrec main.cpp telegram_recorder.cpp auth.cpp message_reader.cpp config.cpp db_writer.cpp)
 target_link_libraries(tgrec PRIVATE Td::TdStatic config++ spdlog fmt)
 set_property(TARGET tgrec PROPERTY CXX_STANDARD 17)
