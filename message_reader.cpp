@@ -17,13 +17,26 @@
 
 #include "telegram_recorder.hpp"
 
-double getMessageReadTime(std::shared_ptr<td_api::message>& message) {
-  // TODO
-  // get message type
-  // get message params according to type
-  // if text: 250 wpm
-  // if video, length
-  // if photo, 5 sec
+unsigned int getNumberOfWordsInString(std::string& text) {
+  unsigned int numWords = 0;
+  std::size_t found = text.find(' ');
+  while (found!=std::string::npos) {
+    numWords++;
+    found = text.find(' ', found+1);
+  }
+  return numWords;
+}
+
+double getMessageReadTime(std::shared_ptr<td_api::message>& message, ConfigParams& config) {
+  if(message->content_->get_id() == td_api::messageText::ID) {
+    td_api::messageText& msgText = static_cast<td_api::messageText&>(*message->content_);
+    return getNumberOfWordsInString(msgText.text_->text_) * (config.humanParams.textReadSpeedWPM/60.0);
+  } else if(message->content_->get_id() == td_api::messageVideo::ID) {
+    td_api::messageVideo& msgVideo = static_cast<td_api::messageVideo&>(*message->content_);
+    return static_cast<double>(msgVideo.video_->duration_);
+  } else if(message->content_->get_id() == td_api::messagePhoto::ID) {
+    return config.humanParams.photoReadSpeedSec;
+  }
   return 1.0;
 }
 
@@ -58,7 +71,7 @@ void TelegramRecorder::runMessageReader() {
         openChat->chat_id_ = chat;
         this->sendQuery(std::move(openChat), {});
         for(auto& message : this->toReadMessageQueue[chat]) {
-          double timeToRead = getMessageReadTime(message);
+          double timeToRead = getMessageReadTime(message, this->config);
           this->markMessageAsRead(chat, message->id_);
           std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(timeToRead * 1000)));
         }
