@@ -19,6 +19,10 @@
 #include <td/telegram/td_api.h>
 
 #include "config.hpp"
+#include "lru.hpp"
+
+#define USER_CACHE_SIZE 32
+#define CHAT_CACHE_SIZE 32
 
 namespace td_api = td::td_api;
 
@@ -27,6 +31,21 @@ using TDAPIObjectPtr = td_api::object_ptr<td_api::Object>;
 // C++17 overload pattern
 template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 template<class... Ts> overload(Ts...) -> overload<Ts...>;
+
+typedef struct TelegramUser {
+  td_api::int53 userID;
+  std::string fullName;
+  std::string userName;
+  std::string bio;
+  std::string profilePicPath;
+} TelegramUser;
+
+typedef struct TelegramChat {
+  td_api::int53 chatID;
+  std::string name;
+  std::string about;
+  std::string profilePicPath;
+} TelegramChat;
 
 class TelegramRecorder {
   public:
@@ -52,6 +71,12 @@ class TelegramRecorder {
     void runMessageReader();
     void markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID);
     bool writeMessageToDB(std::shared_ptr<td_api::message>& message);
+    std::unique_ptr<TelegramChat> retrieveChatFromDB(td_api::int53 chatID);
+    std::unique_ptr<TelegramUser> retrieveUserFromDB(td_api::int53 userID);
+    void retrieveAndWriteChatFromTelegram(td_api::int53 chatID);
+    void retrieveAndWriteUserFromTelegram(td_api::int53 userID);
+    bool writeUserToDB(std::unique_ptr<TelegramUser>& user);
+    bool writeChatToDB(std::unique_ptr<TelegramChat>& chat);
     void runDBWriter();
     bool initDB();
 
@@ -71,6 +96,8 @@ class TelegramRecorder {
     std::condition_variable messagesAvailableToWrite;
     ConfigParams config;
     sqlite3 *db;
+    LRU<td_api::int53, std::unique_ptr<TelegramUser>> userCache{USER_CACHE_SIZE};
+    LRU<td_api::int53, std::unique_ptr<TelegramChat>> chatCache{CHAT_CACHE_SIZE};
 };
 
 #endif

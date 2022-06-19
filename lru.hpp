@@ -48,14 +48,14 @@ void LRU<K, V>::put(K key, V value) {
       if(this->itemList[i] == key) {
         this->itemList.erase(this->itemList.begin() + i);
         this->itemList.insert(this->itemList.begin(), key);
-        this->data[key] = value;
+        this->data[key] = std::move(value);
         return;
       }
     }
     SPDLOG_ERROR("Inconsistency between cache map and list");
   } else {
     this->itemList.insert(this->itemList.begin(), key);
-    this->data[key] = value;
+    this->data[key] = std::move(value);
     for(unsigned int i = this->numItems(); i > this->size; i--) {
       this->data.erase(this->itemList[i-1]);
       this->itemList.pop_back();

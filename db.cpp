@@ -9,6 +9,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 #include <spdlog/spdlog.h>
 
+#include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
 bool checkTableExists(sqlite3* db, std::string tableName) {
@@ -142,39 +143,6 @@ void TelegramRecorder::enqueueMessageToWrite(std::shared_ptr<td_api::message>& m
   this->messagesAvailableToWrite.notify_one();
 }
 
-td_api::int53 getMessageSenderID(std::shared_ptr<td_api::message>& message) {
-  td_api::int53 senderID;
-  td_api::downcast_call(*message->sender_id_,
-    overload {
-      [&senderID](td_api::messageSenderUser &user) {
-        senderID = user.user_id_;
-      },
-      [&senderID](td_api::messageSenderChat &chat) {
-        senderID = chat.chat_id_;
-      }
-    }
-  );
-  return senderID;
-}
-
-std::string getMessageText(std::shared_ptr<td_api::message>& message) {
-  if (message->content_->get_id() == td_api::messageText::ID) {
-    return static_cast<td_api::messageText&>(
-      *message->content_
-    ).text_->text_;
-  }
-  // TODO: Add more message types
-  return "";
-}
-
-std::string downloadMessageData(std::shared_ptr<td_api::message>& message) {
-  if (message->content_->get_id() == td_api::messageText::ID) {
-    // no data
-  }
-  // TODO: Add more message types
-  return "";
-}
-
 bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& message) {
   SPDLOG_DEBUG("Writing message {} from chat {} to DB", message->id_, message->chat_id_);
   int rc;
@@ -212,6 +180,123 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   statement += std::to_string(senderID) + ",";
   statement += (message->reply_to_message_id_ ? ("'" + std::to_string(message->reply_in_chat_id_) + ":" + std::to_string(message->reply_to_message_id_) + "'") : "NULL") + ",";
   statement += (message->forward_info_ == NULL ? "NULL" : (std::to_string(message->forward_info_->from_chat_id_) + ":" + std::to_string(message->forward_info_->from_message_id_)));
+  statement += ");";
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+
+  rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  if (rc != SQLITE_OK ) {
+    SPDLOG_ERROR("Error inserting data: {}", errMsg);
+      sqlite3_free(errMsg);
+      return false;
+  }
+  return true;
+}
+
+std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53 chatID) {
+  std::string statement = "SELECT name, about, pic_file_id FROM chats WHERE chat_id='" + std::to_string(chatID) + "';";
+  char *errMsg = NULL;
+  int rc;
+  TelegramChat *chat = NULL;
+  bool exists = false;
+
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(this->db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+      SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
+      return std::unique_ptr<TelegramChat>(chat);
+  }
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    exists = true;
+    chat = new TelegramChat;
+    chat->chatID = chatID;
+    chat->name = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+    chat->about = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+    chat->profilePicPath = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+  }
+  if (rc != SQLITE_DONE) {
+    SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
+  }
+  sqlite3_finalize(stmt);
+  return std::unique_ptr<TelegramChat>(chat);
+}
+
+std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53 userID) {
+  std::string statement = "SELECT fullname, username, bio, profile_pic_file_id FROM users WHERE user_id='" + std::to_string(userID) + "';";
+  char *errMsg = NULL;
+  int rc;
+  TelegramUser *user = NULL;
+  bool exists = false;
+
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(this->db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+      SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
+      return std::unique_ptr<TelegramUser>(user);
+  }
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    exists = true;
+    user = new TelegramUser;
+    user->userID = userID;
+    user->fullName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+    user->userName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+    user->bio = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+    user->profilePicPath = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+  }
+  if (rc != SQLITE_DONE) {
+    SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
+  }
+  sqlite3_finalize(stmt);
+  return std::unique_ptr<TelegramUser>(user);
+}
+
+bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
+  SPDLOG_DEBUG("Writing user {} to DB", user->userID);
+  int rc;
+  char* errMsg = NULL;
+
+  std::string statement = "INSERT INTO users ("
+                            "user_id,"
+                            "fullname,"
+                            "username,"
+                            "bio,"
+                            "profile_pic_file_id"
+                          ") VALUES "
+                          "(";
+  statement += std::to_string(user->userID) + ",";
+  statement += "'" + user->fullName + "',";
+  statement += "'" + user->userName + "',";
+  statement += "'" + user->bio + "',";
+  statement += "'" + user->profilePicPath + "'";
+  statement += ");";
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+
+  rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  if (rc != SQLITE_OK ) {
+    SPDLOG_ERROR("Error inserting data: {}", errMsg);
+      sqlite3_free(errMsg);
+      return false;
+  }
+  return true;
+}
+
+bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
+  SPDLOG_DEBUG("Writing chat {} to DB", chat->chatID);
+  int rc;
+  char* errMsg = NULL;
+
+  std::string statement = "INSERT INTO chats ("
+                            "chat_id,"
+                            "name,"
+                            "about,"
+                            "pic_file_id"
+                          ") VALUES "
+                          "(";
+  statement += std::to_string(chat->chatID) + ",";
+  statement += "'" + chat->name + "',";
+  statement += "'" + chat->about + "',";
+  statement += "'" + chat->profilePicPath + "'";
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
