@@ -50,7 +50,7 @@ bool TelegramRecorder::initDB() {
                               "id TEXT PRIMARY KEY,"
                               "message TEXT,"
                               "message_type INTEGER,"
-                              "content_file_id TEXT,"
+                              "content_file_id INTEGER,"
                               "chat_id INTEGER,"
                               "sender_id INTEGER,"
                               "in_reply_of TEXT,"
@@ -71,7 +71,7 @@ bool TelegramRecorder::initDB() {
                               "fullname TEXT,"
                               "username TEXT,"
                               "bio TEXT,"
-                              "profile_pic_file_id TEXT"
+                              "profile_pic_file_id INTEGER"
                             ");";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
@@ -86,12 +86,25 @@ bool TelegramRecorder::initDB() {
                               "chat_id INTEGER PRIMARY KEY,"
                               "name TEXT,"
                               "about TEXT,"
-                              "pic_file_id TEXT"
+                              "pic_file_id INTEGER"
                             ");";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
     if (rc != SQLITE_OK ) {
       SPDLOG_ERROR("Error creating chats table: {}", errMsg);
+        sqlite3_free(errMsg);
+        return false;
+    }
+  }
+  if(!checkTableExists(this->db, std::move("files"))) {
+    std::string statement = "CREATE TABLE files("
+                              "file_id INTEGER PRIMARY KEY,"
+                              "downloaded_as TEXT"
+                            ");";
+    SPDLOG_DEBUG("Executing SQL: {}", statement);
+    rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+    if (rc != SQLITE_OK ) {
+      SPDLOG_ERROR("Error creating files table: {}", errMsg);
         sqlite3_free(errMsg);
         return false;
     }
@@ -152,9 +165,13 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   td_api::int53 senderID = getMessageSenderID(message);
   std::string text = getMessageText(message);
   
-  std::string downloadedDataPath;
+  td_api::int32 fileID = 0;
   try {
-    downloadedDataPath = downloadMessageData(message);  
+    td_api::file* f = getMessageContentFileReference(message);
+    if(f) {
+      fileID = f->id_;
+      this->downloadFile(*f);
+    }
   } catch(const std::runtime_error& e) {
     SPDLOG_WARN("Unable to download message data for message_id {} from chat_id {}. Storing anyway...", message->id_, message->chat_id_);
   }
@@ -175,7 +192,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   statement += "'" + std::to_string(message->chat_id_) + ":" + std::to_string(message->id_) + "',";
   statement += "'" + text + "',";
   statement += std::to_string(msgType) + ",";
-  statement += (downloadedDataPath == "" ? "NULL" : downloadedDataPath) + ",";
+  statement += (fileID == 0 ? "NULL" : std::to_string(fileID)) + ",";
   statement += std::to_string(message->chat_id_) + ",";
   statement += std::to_string(senderID) + ",";
   statement += (message->reply_to_message_id_ ? ("'" + std::to_string(message->reply_in_chat_id_) + ":" + std::to_string(message->reply_to_message_id_) + "'") : "NULL") + ",";
@@ -212,7 +229,7 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
     chat->chatID = chatID;
     chat->name = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
     chat->about = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
-    chat->profilePicPath = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+    chat->profilePicFileID = sqlite3_column_int(stmt, 2);
   }
   if (rc != SQLITE_DONE) {
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
@@ -242,7 +259,7 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
     user->fullName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
     user->userName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
     user->bio = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
-    user->profilePicPath = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+    user->profilePicFileID = sqlite3_column_int(stmt, 3);
   }
   if (rc != SQLITE_DONE) {
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
@@ -268,7 +285,7 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
   statement += "'" + user->fullName + "',";
   statement += "'" + user->userName + "',";
   statement += "'" + user->bio + "',";
-  statement += "'" + user->profilePicPath + "'";
+  statement += std::to_string(user->profilePicFileID);
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
@@ -296,7 +313,31 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
   statement += std::to_string(chat->chatID) + ",";
   statement += "'" + chat->name + "',";
   statement += "'" + chat->about + "',";
-  statement += "'" + chat->profilePicPath + "'";
+  statement += std::to_string(chat->profilePicFileID);
+  statement += ");";
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+
+  rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  if (rc != SQLITE_OK ) {
+    SPDLOG_ERROR("Error inserting data: {}", errMsg);
+      sqlite3_free(errMsg);
+      return false;
+  }
+  return true;
+}
+
+bool TelegramRecorder::writeFileToDB(td_api::int32 fileID, std::string& downloadedAs) {
+  SPDLOG_DEBUG("Writing file {} to DB", fileID);
+  int rc;
+  char* errMsg = NULL;
+
+  std::string statement = "INSERT INTO files ("
+                            "file_id,"
+                            "downloaded_as"
+                          ") VALUES "
+                          "(";
+  statement += std::to_string(fileID) + ",";
+  statement += "'" + downloadedAs + "'";
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 

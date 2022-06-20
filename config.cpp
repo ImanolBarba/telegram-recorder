@@ -31,6 +31,7 @@ bool TelegramRecorder::loadConfig() {
       std::move(cfg.lookup("api_hash")),
       std::move(cfg.lookup("first_name")),
       std::move(cfg.lookup("first_name")),
+      std::move(cfg.lookup("download_folder")),
       {
         std::move(cfg.lookup("read_msg_frequency_mean")),
         std::move(cfg.lookup("read_msg_frequency_std_dev")),

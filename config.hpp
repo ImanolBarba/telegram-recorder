@@ -1,3 +1,9 @@
+//
+// Copyright (c) 2022, Imanol-Mikel Barba Sabariego
+// All rights reserved.
+// 
+// Distributed under BSD 3-Clause License. See LICENSE.
+
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
@@ -16,6 +22,7 @@ typedef struct ConfigParams {
   std::string apiHash;
   std::string firstName;
   std::string lastName;
+  std::string downloadFolder;
   HumanBehaviourParams humanParams;
 } ConfigParams;
 

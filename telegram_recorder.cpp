@@ -6,6 +6,7 @@
 
 // TODO: Video and voice chats
 
+#include <filesystem>
 #include <thread>
 
 #include <unistd.h>
@@ -23,10 +24,13 @@ TelegramRecorder::TelegramRecorder() {
 }
 
 void TelegramRecorder::start() {
-   if(!this->loadConfig()) {
+  if(!this->loadConfig()) {
     SPDLOG_ERROR("Unable to load configuration file");
     return;
   }
+
+  create_directory(std::filesystem::current_path() / this->config.downloadFolder);
+
   std::thread recorderThread(&TelegramRecorder::runRecorder, this);
   recorderThread.detach();
   std::thread readerThread(&TelegramRecorder::runMessageReader, this);
@@ -194,6 +198,8 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
       std::shared_ptr<td_api::chat> c = std::shared_ptr<td_api::chat>(td::move_tl_object_as<td_api::chat>(object).release());
       auto chatExtraInfoCallback = [this, c](TDAPIObjectPtr object) {
         if(object) {
+          this->downloadFile(*c->photo_->big_);
+          td_api::int32 fileID = c->photo_->big_->id_;
           std::string description;
           if(object->get_id() == td_api::basicGroupFullInfo::ID) {
             td::tl::unique_ptr<td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
@@ -206,7 +212,7 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
           chat->chatID = c->id_;
           chat->name = c->title_;
           chat->about = description;
-          chat->profilePicPath = ""; // TODO
+          chat->profilePicFileID = fileID;
           std::unique_ptr<TelegramChat> chatPtr = std::unique_ptr<TelegramChat>(chat);
           this->writeChatToDB(chatPtr);
           this->chatCache.put(chat->chatID, std::move(chatPtr));
@@ -237,11 +243,16 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       this->sendQuery(std::move(getUserFullInfo), [this, u](TDAPIObjectPtr object) {
         if(object) {
           td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
+          td_api::int32 fileID;
+          if(u->profile_photo_->id_) {
+            this->downloadFile(*u->profile_photo_->big_);
+            fileID = u->profile_photo_->big_->id_;
+          }
           TelegramUser* user = new TelegramUser;
           user->userID = u->id_;
           user->fullName = u->first_name_ + " " + u->last_name_;
           user->userName = u->username_;
-          user->profilePicPath = ""; // TODO
+          user->profilePicFileID = fileID;
           user->bio = ufi->bio_;
           std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);
           this->writeUserToDB(userPtr);

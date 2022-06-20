@@ -37,14 +37,14 @@ typedef struct TelegramUser {
   std::string fullName;
   std::string userName;
   std::string bio;
-  std::string profilePicPath;
+  td_api::int32 profilePicFileID;
 } TelegramUser;
 
 typedef struct TelegramChat {
   td_api::int53 chatID;
   std::string name;
   std::string about;
-  std::string profilePicPath;
+  td_api::int32 profilePicFileID;
 } TelegramChat;
 
 class TelegramRecorder {
@@ -77,6 +77,8 @@ class TelegramRecorder {
     void retrieveAndWriteUserFromTelegram(td_api::int53 userID);
     bool writeUserToDB(std::unique_ptr<TelegramUser>& user);
     bool writeChatToDB(std::unique_ptr<TelegramChat>& chat);
+    bool writeFileToDB(td_api::int32 fileID, std::string& downloadedAs);
+    void downloadFile(td_api::file& file);
     void runDBWriter();
     bool initDB();
 
