@@ -9,6 +9,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 #include <spdlog/spdlog.h>
 
+#include "hash.hpp"
 #include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
@@ -50,7 +51,7 @@ bool TelegramRecorder::initDB() {
                               "id TEXT PRIMARY KEY,"
                               "message TEXT,"
                               "message_type INTEGER,"
-                              "content_file_id INTEGER,"
+                              "content_file_id TEXT,"
                               "chat_id INTEGER,"
                               "sender_id INTEGER,"
                               "in_reply_of TEXT,"
@@ -71,7 +72,7 @@ bool TelegramRecorder::initDB() {
                               "fullname TEXT,"
                               "username TEXT,"
                               "bio TEXT,"
-                              "profile_pic_file_id INTEGER"
+                              "profile_pic_file_id TEXT"
                             ");";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
@@ -86,7 +87,7 @@ bool TelegramRecorder::initDB() {
                               "chat_id INTEGER PRIMARY KEY,"
                               "name TEXT,"
                               "about TEXT,"
-                              "pic_file_id INTEGER"
+                              "pic_file_id TEXT"
                             ");";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
@@ -98,8 +99,9 @@ bool TelegramRecorder::initDB() {
   }
   if(!checkTableExists(this->db, std::move("files"))) {
     std::string statement = "CREATE TABLE files("
-                              "file_id INTEGER PRIMARY KEY,"
-                              "downloaded_as TEXT"
+                              "file_id TEXT PRIMARY KEY,"
+                              "downloaded_as TEXT,"
+                              "origin_id TEXT"
                             ");";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
@@ -164,13 +166,16 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   int32_t msgType = message->content_->get_id();
   td_api::int53 senderID = getMessageSenderID(message);
   std::string text = getMessageText(message);
+  std::string compoundMessageID = std::to_string(message->chat_id_) + ":" + std::to_string(message->id_);
   
-  td_api::int32 fileID = 0;
+  std::string fileOriginID;
+  
   try {
     td_api::file* f = getMessageContentFileReference(message->content_);
     if(f) {
-      fileID = f->id_;
-      this->downloadFile(*f);
+      std::string fileIDStr = std::to_string(f->id_) + ":" + compoundMessageID;
+      fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+      this->downloadFile(*f, compoundMessageID);
     }
   } catch(const std::runtime_error& e) {
     SPDLOG_WARN("Unable to download message data for message_id {} from chat_id {}. Storing anyway...", message->id_, message->chat_id_);
@@ -190,10 +195,10 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
                             "forwarded_from"
                           ") VALUES "
                           "(";
-  statement += "'" + std::to_string(message->chat_id_) + ":" + std::to_string(message->id_) + "',";
+  statement += "'" + compoundMessageID + "',";
   statement += "'" + text + "',";
   statement += std::to_string(msgType) + ",";
-  statement += (fileID == 0 ? "NULL" : std::to_string(fileID)) + ",";
+  statement += (fileOriginID == "" ? "NULL" : "'" + fileOriginID + "'") + ",";
   statement += std::to_string(message->chat_id_) + ",";
   statement += std::to_string(senderID) + ",";
   statement += (message->reply_to_message_id_ ? ("'" + std::to_string(message->reply_in_chat_id_) + ":" + std::to_string(message->reply_to_message_id_) + "'") : "NULL") + ",";
@@ -290,7 +295,7 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
   statement += "'" + user->fullName + "',";
   statement += "'" + user->userName + "',";
   statement += "'" + user->bio + "',";
-  statement += std::to_string(user->profilePicFileID);
+  statement += "'" + user->profilePicFileID + "'";
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
@@ -320,7 +325,7 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
   statement += std::to_string(chat->chatID) + ",";
   statement += "'" + chat->name + "',";
   statement += "'" + chat->about + "',";
-  statement += std::to_string(chat->profilePicFileID);
+  statement += "'" + chat->profilePicFileID + "'";
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
@@ -335,18 +340,20 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
   return true;
 }
 
-bool TelegramRecorder::writeFileToDB(td_api::int32 fileID, std::string& downloadedAs) {
+bool TelegramRecorder::writeFileToDB(std::string& fileID, std::string& downloadedAs, const std::string& originID) {
   SPDLOG_DEBUG("Writing file {} to DB", fileID);
   int rc;
   char* errMsg = NULL;
 
   std::string statement = "REPLACE INTO files ("
                             "file_id,"
-                            "downloaded_as"
+                            "downloaded_as,"
+                            "origin_id"
                           ") VALUES "
                           "(";
-  statement += std::to_string(fileID) + ",";
-  statement += "'" + downloadedAs + "'";
+  statement += "'" + fileID + "',";
+  statement += "'" + downloadedAs + "',";
+  statement += "'" + originID + "'";
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
@@ -392,19 +399,20 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
 bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_api::object_ptr<td_api::MessageContent>& newContent) {
   SPDLOG_DEBUG("Updating content from message ID {}", compoundMessageID);
 
-  td_api::int32 fileID;
   td_api::file* f = getMessageContentFileReference(newContent);
   if(!f) {
     // No content to update
     return true;
   }
-  fileID = f->id_;
-  this->downloadFile(*f);
+
+  std::string fileOrigin = std::to_string(f->id_) + ":" + compoundMessageID;
+  std::string fileOriginID = SHA256(fileOrigin.c_str(), fileOrigin.size());
+  this->downloadFile(*f, compoundMessageID);
 
   int rc;
   char* errMsg = NULL;
 
-  std::string statement = "UPDATE messages SET content_file_id = " + std::to_string(fileID) + " WHERE id = '" + compoundMessageID + "';";
+  std::string statement = "UPDATE messages SET content_file_id = '" + fileOriginID + "' WHERE id = '" + compoundMessageID + "';";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();

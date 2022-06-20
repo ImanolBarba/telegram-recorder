@@ -14,6 +14,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 #include <spdlog/spdlog.h>
 
+#include "hash.hpp"
 #include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
@@ -220,10 +221,13 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
       auto chatExtraInfoCallback = [this, c](TDAPIObjectPtr object) {
         if(object) {
           std::string description;
-          td_api::int32 fileID;
+          std::string fileOrigin;
+          std::string fileOriginID;
           if(c->photo_) {
-            this->downloadFile(*c->photo_->big_);
-            fileID = c->photo_->big_->id_;
+            fileOrigin = std::to_string(c->id_);
+            std::string fileIDStr = std::to_string(c->photo_->big_->id_) + ":" + fileOrigin;
+            fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+            this->downloadFile(*c->photo_->big_, fileOrigin);
           }
           // TODO: For some weird reason, the description is always the one the group was created with, it doesn't get updated
           if(object->get_id() == td_api::basicGroupFullInfo::ID) {
@@ -237,7 +241,7 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
           chat->chatID = c->id_;
           chat->name = c->title_;
           chat->about = description;
-          chat->profilePicFileID = fileID;
+          chat->profilePicFileID = fileOriginID;
           std::unique_ptr<TelegramChat> chatPtr = std::unique_ptr<TelegramChat>(chat);
           this->writeChatToDB(chatPtr);
           this->chatCache.put(chat->chatID, std::move(chatPtr));
@@ -275,16 +279,19 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       this->sendQuery(std::move(getUserFullInfo), [this, u](TDAPIObjectPtr object) {
         if(object) {
           td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
-          td_api::int32 fileID;
+          std::string fileOrigin;
+          std::string fileOriginID;
           if(u->profile_photo_ && u->profile_photo_->id_) {
-            this->downloadFile(*u->profile_photo_->big_);
-            fileID = u->profile_photo_->big_->id_;
+            fileOrigin = std::to_string(u->id_);
+            std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
+            fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+            this->downloadFile(*u->profile_photo_->big_, fileOrigin);
           }
           TelegramUser* user = new TelegramUser;
           user->userID = u->id_;
           user->fullName = u->first_name_ + " " + u->last_name_;
           user->userName = u->username_;
-          user->profilePicFileID = fileID;
+          user->profilePicFileID = fileOriginID;
           user->bio = ufi->bio_;
           std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);
           this->writeUserToDB(userPtr);

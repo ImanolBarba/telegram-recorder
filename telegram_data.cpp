@@ -6,6 +6,7 @@
 
 #include <filesystem>
 
+#include "hash.hpp"
 #include "telegram_data.hpp"
 
 td_api::int53 getMessageSenderID(std::shared_ptr<td_api::message>& message) {
@@ -71,8 +72,7 @@ td::td_api::file* getMessageContentFileReference(td_api::object_ptr<td_api::Mess
   return NULL;
 }
 
-void TelegramRecorder::downloadFile(td_api::file& file) {
-  // TODO: The local file ID is shit, create content ID that is properly unique
+void TelegramRecorder::downloadFile(td_api::file& file, std::string& originID) {
   SPDLOG_INFO("Enqueuing download for file ID {}", file.id_);
   td_api::object_ptr<td_api::downloadFile> downloadFile = td_api::make_object<td_api::downloadFile>();
   downloadFile->file_id_ = file.id_;
@@ -80,7 +80,7 @@ void TelegramRecorder::downloadFile(td_api::file& file) {
   downloadFile->offset_ = 0;
   downloadFile->limit_ = 0;
   downloadFile->synchronous_ = true;
-  this->sendQuery(std::move(downloadFile), [this, id = file.id_](TDAPIObjectPtr object) {
+  this->sendQuery(std::move(downloadFile), [this, id = file.id_, originID](TDAPIObjectPtr object) {
     if(object) {
       if(object->get_id() == td_api::error::ID) {
         td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
@@ -100,7 +100,9 @@ void TelegramRecorder::downloadFile(td_api::file& file) {
       std::string downloadPath = std::filesystem::path(this->config.downloadFolder) / std::filesystem::path(f->local_->path_).filename();
       try {
         std::filesystem::copy_file(f->local_->path_, downloadPath, std::filesystem::copy_options::skip_existing);
-        this->writeFileToDB(f->id_, downloadPath);
+        std::string fileIDStr = std::to_string(f->id_) + ":" + originID;
+        std::string fileID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+        this->writeFileToDB(fileID, downloadPath, originID);
       } catch(std::filesystem::filesystem_error& e) {
         SPDLOG_ERROR("Unable to copy file {}: {}", downloadPath, e.what());
       }
