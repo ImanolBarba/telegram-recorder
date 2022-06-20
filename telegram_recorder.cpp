@@ -18,6 +18,8 @@
 #include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
+// TODO: Add error handling from API responses in maaaaaaaaaany places
+
 TelegramRecorder::TelegramRecorder() {
     td::ClientManager::execute(td_api::make_object<td_api::setLogVerbosityLevel>(2));
     this->clientManager = std::make_unique<td::ClientManager>();
@@ -165,14 +167,17 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
       },
       [this](td_api::updateSupergroupFullInfo& updateSupergroupFullInfo) {
         // Extended info of a supergroup/channel changed
+        // NOTE: This update is not being triggered when the description is 
+        // changed, we only get this info if the picture changes and a couple 
+        // more occasions
+        // TODO: supergroup ID != chat ID
         SPDLOG_DEBUG("Received update: updateSupergroupFullInfo");
-        // See https://github.com/tdlib/td/issues/2023
-        this->retrieveAndWriteChatFromTelegram(-1 * updateSupergroupFullInfo.supergroup_id_);
+        this->retrieveAndWriteChatFromTelegram(-1 * (1e12 + updateSupergroupFullInfo.supergroup_id_));
       },
       [this](td_api::updateBasicGroupFullInfo& updateBasicGroupFullInfo) {
         // Extended info of a group changed
+        // TODO: basic group ID != chat ID
         SPDLOG_DEBUG("Received update: updateBasicGroupFullInfo");
-        // See https://github.com/tdlib/td/issues/2023
         this->retrieveAndWriteChatFromTelegram(-1 * updateBasicGroupFullInfo.basic_group_id_);
       },
       [this](td_api::updateNewMessage& updateNewMessage) {
@@ -229,7 +234,8 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
             fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
             this->downloadFile(*c->photo_->big_, fileOrigin);
           }
-          // TODO: For some weird reason, the description is always the one the group was created with, it doesn't get updated
+          // Group full info's description is only updated after the group is 
+          // opened when messages are read or the profile pic is updated
           if(object->get_id() == td_api::basicGroupFullInfo::ID) {
             td::tl::unique_ptr<td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
             description = bgfi->description_;
@@ -248,13 +254,13 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
         }
       };
       if(c->type_->get_id() == td_api::chatTypeSupergroup::ID) {
+        // TODO: supergroup ID != chat ID
         td_api::object_ptr<td::td_api::getSupergroupFullInfo> getSupergroupFullInfo = td_api::make_object<td_api::getSupergroupFullInfo>();
-        // See https://github.com/tdlib/td/issues/2023
-        getSupergroupFullInfo->supergroup_id_ = -1 * c->id_;
+        getSupergroupFullInfo->supergroup_id_ = -1 * (1e12 + c->id_);
         this->sendQuery(std::move(getSupergroupFullInfo), chatExtraInfoCallback);
       } else {
+        // TODO: basic group ID != chat ID
         td_api::object_ptr<td::td_api::getBasicGroupFullInfo> getBasicGroupFullInfo = td_api::make_object<td_api::getBasicGroupFullInfo>();
-        // See https://github.com/tdlib/td/issues/2023
         getBasicGroupFullInfo->basic_group_id_ = -1 * c->id_;
         this->sendQuery(std::move(getBasicGroupFullInfo), chatExtraInfoCallback);
       }
