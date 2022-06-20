@@ -118,49 +118,65 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
   td_api::downcast_call(
     *update,
     overload {
+      // Most of these are lazy solutions because I don't wanna have specific 
+      // UPDATE queries for every single thing. Sorry!
       [this](td_api::updateAuthorizationState& updateAutorizationState) {
         // Auth state changed
+        SPDLOG_DEBUG("Received update: updateAuthorizationState");
         this->authState = std::move(updateAutorizationState.authorization_state_);
         onAuthStateUpdate();
       },
       [this](td_api::updateNewChat& updateNewChat) {
         // A new chat has been loaded/created
-        // TODO
+        SPDLOG_DEBUG("Received update: updateNewChat");
+        this->retrieveAndWriteChatFromTelegram(updateNewChat.chat_->id_);
       },
       [this](td_api::updateChatTitle& updateChatTitle) {
         // The title of a chat was changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateChatTitle");
+        this->retrieveAndWriteChatFromTelegram(updateChatTitle.chat_id_);
       },
       [this](td_api::updateUser& updateUser) {
         // Some data of a user has changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateUser");
+        this->retrieveAndWriteUserFromTelegram(updateUser.user_->id_);
       },
       [this](td_api::updateChatPhoto& updateChatPhoto) {
         // Chat photo was changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateChatPhoto");
+        this->retrieveAndWriteChatFromTelegram(updateChatPhoto.chat_id_);
       },
       [this](td_api::updateMessageContent& updateMessageContent) {
         // Message content changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateMessageContent");
+        std::string compoundMessageID = std::to_string(updateMessageContent.chat_id_) + ":" + std::to_string(updateMessageContent.message_id_);
+        this->updateMessageContent(compoundMessageID, updateMessageContent.new_content_);
       },
       [this](td_api::updateMessageEdited& updateMessageEdited) {
         // Message was edited
-        // TODO
+        SPDLOG_DEBUG("Received update: updateMessageEdited");
+        this->updateMessageText(updateMessageEdited.chat_id_, updateMessageEdited.message_id_);
       },
       [this](td_api::updateUserFullInfo& updateUserFullInfo) {
         // Extended info of an user changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateUserFullInfo");
+        this->retrieveAndWriteUserFromTelegram(updateUserFullInfo.user_id_);
       },
       [this](td_api::updateSupergroupFullInfo& updateSupergroupFullInfo) {
         // Extended info of a supergroup/channel changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateSupergroupFullInfo");
+        // See https://github.com/tdlib/td/issues/2023
+        this->retrieveAndWriteChatFromTelegram(-1 * updateSupergroupFullInfo.supergroup_id_);
       },
       [this](td_api::updateBasicGroupFullInfo& updateBasicGroupFullInfo) {
         // Extended info of a group changed
-        // TODO
+        SPDLOG_DEBUG("Received update: updateBasicGroupFullInfo");
+        // See https://github.com/tdlib/td/issues/2023
+        this->retrieveAndWriteChatFromTelegram(-1 * updateBasicGroupFullInfo.basic_group_id_);
       },
       [this](td_api::updateNewMessage& updateNewMessage) {
         // A new message was received
+        SPDLOG_DEBUG("Received update: updateNewMessage");
         std::shared_ptr<td_api::message> message = std::shared_ptr<td_api::message>(updateNewMessage.message_.release());
 
         std::unique_ptr<TelegramUser>* senderPtr = this->userCache.get(getMessageSenderID(message));
@@ -193,14 +209,23 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
 void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
   td_api::object_ptr<td::td_api::getChat> getChat = td_api::make_object<td_api::getChat>();
   getChat->chat_id_ = chatID;
-  this->sendQuery(std::move(getChat), [this](TDAPIObjectPtr object) {
+  this->sendQuery(std::move(getChat), [this, chatID](TDAPIObjectPtr object) {
     if(object) {
+      if(object->get_id() == td_api::error::ID) {
+        td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+        SPDLOG_ERROR("Retrieve chat info for chat ID {} failed: {}", chatID, err->message_);
+        return;
+      }
       std::shared_ptr<td_api::chat> c = std::shared_ptr<td_api::chat>(td::move_tl_object_as<td_api::chat>(object).release());
       auto chatExtraInfoCallback = [this, c](TDAPIObjectPtr object) {
         if(object) {
-          this->downloadFile(*c->photo_->big_);
-          td_api::int32 fileID = c->photo_->big_->id_;
           std::string description;
+          td_api::int32 fileID;
+          if(c->photo_) {
+            this->downloadFile(*c->photo_->big_);
+            fileID = c->photo_->big_->id_;
+          }
+          // TODO: For some weird reason, the description is always the one the group was created with, it doesn't get updated
           if(object->get_id() == td_api::basicGroupFullInfo::ID) {
             td::tl::unique_ptr<td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
             description = bgfi->description_;
@@ -220,11 +245,13 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
       };
       if(c->type_->get_id() == td_api::chatTypeSupergroup::ID) {
         td_api::object_ptr<td::td_api::getSupergroupFullInfo> getSupergroupFullInfo = td_api::make_object<td_api::getSupergroupFullInfo>();
-        getSupergroupFullInfo->supergroup_id_ = c->id_;
+        // See https://github.com/tdlib/td/issues/2023
+        getSupergroupFullInfo->supergroup_id_ = -1 * c->id_;
         this->sendQuery(std::move(getSupergroupFullInfo), chatExtraInfoCallback);
       } else {
         td_api::object_ptr<td::td_api::getBasicGroupFullInfo> getBasicGroupFullInfo = td_api::make_object<td_api::getBasicGroupFullInfo>();
-        getBasicGroupFullInfo->basic_group_id_ = c->id_;
+        // See https://github.com/tdlib/td/issues/2023
+        getBasicGroupFullInfo->basic_group_id_ = -1 * c->id_;
         this->sendQuery(std::move(getBasicGroupFullInfo), chatExtraInfoCallback);
       }
     }
@@ -234,8 +261,13 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
 void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
   td_api::object_ptr<td_api::getUser> getUser = td_api::make_object<td_api::getUser>();
   getUser->user_id_ = userID;
-  this->sendQuery(std::move(getUser), [this](TDAPIObjectPtr object) {
+  this->sendQuery(std::move(getUser), [this, userID](TDAPIObjectPtr object) {
     if(object) {
+      if(object->get_id() == td_api::error::ID) {
+        td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+        SPDLOG_ERROR("Retrieve user info for user ID {} failed: {}", userID, err->message_);
+        return;
+      }
       std::shared_ptr<td_api::user> u = std::shared_ptr<td_api::user>(td::move_tl_object_as<td_api::user>(object).release());
       // To get the bio...
       td_api::object_ptr<td_api::getUserFullInfo> getUserFullInfo = td_api::make_object<td_api::getUserFullInfo>();
@@ -244,7 +276,7 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
         if(object) {
           td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
           td_api::int32 fileID;
-          if(u->profile_photo_->id_) {
+          if(u->profile_photo_ && u->profile_photo_->id_) {
             this->downloadFile(*u->profile_photo_->big_);
             fileID = u->profile_photo_->big_->id_;
           }

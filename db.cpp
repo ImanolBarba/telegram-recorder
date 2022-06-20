@@ -167,7 +167,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   
   td_api::int32 fileID = 0;
   try {
-    td_api::file* f = getMessageContentFileReference(message);
+    td_api::file* f = getMessageContentFileReference(message->content_);
     if(f) {
       fileID = f->id_;
       this->downloadFile(*f);
@@ -178,6 +178,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
 
   SPDLOG_INFO("Got message: [chat_id: {}] [from: {}]: {}", message->chat_id_, senderID, text);
 
+  // We don't do REPLACE here because we rely on the hidden rowid column to preserve message order
   std::string statement = "INSERT INTO messages ("
                             "id,"
                             "message,"
@@ -217,6 +218,7 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
   bool exists = false;
 
   sqlite3_stmt *stmt;
+  this->toWriteQueueMutex.lock();
   rc = sqlite3_prepare_v2(this->db, statement.c_str(), -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
       SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
@@ -235,6 +237,7 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
   }
   sqlite3_finalize(stmt);
+  this->toWriteQueueMutex.unlock();
   return std::unique_ptr<TelegramChat>(chat);
 }
 
@@ -246,6 +249,7 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
   bool exists = false;
 
   sqlite3_stmt *stmt;
+  this->toWriteQueueMutex.lock();
   rc = sqlite3_prepare_v2(this->db, statement.c_str(), -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
       SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
@@ -265,6 +269,7 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
   }
   sqlite3_finalize(stmt);
+  this->toWriteQueueMutex.unlock();
   return std::unique_ptr<TelegramUser>(user);
 }
 
@@ -273,7 +278,7 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
   int rc;
   char* errMsg = NULL;
 
-  std::string statement = "INSERT INTO users ("
+  std::string statement = "REPLACE INTO users ("
                             "user_id,"
                             "fullname,"
                             "username,"
@@ -289,7 +294,9 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
+  this->toWriteQueueMutex.lock();
   rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
       sqlite3_free(errMsg);
@@ -303,7 +310,7 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
   int rc;
   char* errMsg = NULL;
 
-  std::string statement = "INSERT INTO chats ("
+  std::string statement = "REPLACE INTO chats ("
                             "chat_id,"
                             "name,"
                             "about,"
@@ -317,7 +324,9 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
+  this->toWriteQueueMutex.lock();
   rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
       sqlite3_free(errMsg);
@@ -331,7 +340,7 @@ bool TelegramRecorder::writeFileToDB(td_api::int32 fileID, std::string& download
   int rc;
   char* errMsg = NULL;
 
-  std::string statement = "INSERT INTO files ("
+  std::string statement = "REPLACE INTO files ("
                             "file_id,"
                             "downloaded_as"
                           ") VALUES "
@@ -341,7 +350,66 @@ bool TelegramRecorder::writeFileToDB(td_api::int32 fileID, std::string& download
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
+  this->toWriteQueueMutex.lock();
   rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  this->toWriteQueueMutex.unlock();
+  if (rc != SQLITE_OK ) {
+    SPDLOG_ERROR("Error inserting data: {}", errMsg);
+      sqlite3_free(errMsg);
+      return false;
+  }
+  return true;
+}
+
+void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 messageID) {
+  td_api::object_ptr<td_api::getMessage> getMessage = td_api::make_object<td_api::getMessage>();
+  getMessage->chat_id_ = chatID;
+  getMessage->message_id_ = messageID;
+  this->sendQuery(std::move(getMessage), [this](TDAPIObjectPtr object) {
+    if(object) {
+      std::shared_ptr<td_api::message> newMessage = std::shared_ptr<td_api::message>(td::move_tl_object_as<td_api::message>(object).release());
+      std::string newText = getMessageText(newMessage);
+      std::string compoundMessageID = std::to_string(newMessage->chat_id_) + ":" + std::to_string(newMessage->id_);
+      SPDLOG_DEBUG("Updating message {}", compoundMessageID);
+
+      int rc;
+      char* errMsg = NULL;
+
+      std::string statement = "UPDATE messages SET message = '" + newText + "' WHERE id = '" + compoundMessageID + "';";
+      SPDLOG_DEBUG("Executing SQL: {}", statement);
+
+      this->toWriteQueueMutex.lock();
+      rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+      this->toWriteQueueMutex.unlock();
+      if (rc != SQLITE_OK ) {
+        SPDLOG_ERROR("Error inserting data: {}", errMsg);
+          sqlite3_free(errMsg);
+      }
+    }
+  });
+}
+
+bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_api::object_ptr<td_api::MessageContent>& newContent) {
+  SPDLOG_DEBUG("Updating content from message ID {}", compoundMessageID);
+
+  td_api::int32 fileID;
+  td_api::file* f = getMessageContentFileReference(newContent);
+  if(!f) {
+    // No content to update
+    return true;
+  }
+  fileID = f->id_;
+  this->downloadFile(*f);
+
+  int rc;
+  char* errMsg = NULL;
+
+  std::string statement = "UPDATE messages SET content_file_id = " + std::to_string(fileID) + " WHERE id = '" + compoundMessageID + "';";
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+
+  this->toWriteQueueMutex.lock();
+  rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
       sqlite3_free(errMsg);

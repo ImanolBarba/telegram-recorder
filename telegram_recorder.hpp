@@ -78,6 +78,8 @@ class TelegramRecorder {
     bool writeUserToDB(std::unique_ptr<TelegramUser>& user);
     bool writeChatToDB(std::unique_ptr<TelegramChat>& chat);
     bool writeFileToDB(td_api::int32 fileID, std::string& downloadedAs);
+    void updateMessageText(td_api::int53 chatID, td_api::int53 messageID);
+    bool updateMessageContent(std::string compoundMessageID, td_api::object_ptr<td_api::MessageContent>& newContent);
     void downloadFile(td_api::file& file);
     void runDBWriter();
     bool initDB();

@@ -54,24 +54,25 @@ unsigned int getLargestPhotoIndex(td_api::array<td_api::object_ptr<td_api::photo
   return largestIndex;
 }
 
-td::td_api::file* getMessageContentFileReference(std::shared_ptr<td_api::message>& message) {
-  if (message->content_->get_id() == td_api::messageText::ID) {
+td::td_api::file* getMessageContentFileReference(td_api::object_ptr<td_api::MessageContent>& content) {
+  if (content->get_id() == td_api::messageText::ID) {
     // no data
-  } else if(message->content_->get_id() == td_api::messageVideo::ID) {
-    td_api::messageVideo& msgVideo = static_cast<td_api::messageVideo&>(*message->content_);
+  } else if(content->get_id() == td_api::messageVideo::ID) {
+    td_api::messageVideo& msgVideo = static_cast<td_api::messageVideo&>(*content);
     return msgVideo.video_->video_.get();
-  } else if(message->content_->get_id() == td_api::messagePhoto::ID) {
-    td_api::messagePhoto& msgPhoto = static_cast<td_api::messagePhoto&>(*message->content_);
+  } else if(content->get_id() == td_api::messagePhoto::ID) {
+    td_api::messagePhoto& msgPhoto = static_cast<td_api::messagePhoto&>(*content);
     unsigned int largestIndex = getLargestPhotoIndex(msgPhoto.photo_->sizes_);
     return msgPhoto.photo_->sizes_[largestIndex]->photo_.get();
-  } else if(message->content_->get_id() == td_api::messageDocument::ID) {
-    td_api::messageDocument& msgDoc = static_cast<td_api::messageDocument&>(*message->content_);
+  } else if(content->get_id() == td_api::messageDocument::ID) {
+    td_api::messageDocument& msgDoc = static_cast<td_api::messageDocument&>(*content);
     return msgDoc.document_->document_.get();
   }
   return NULL;
 }
 
 void TelegramRecorder::downloadFile(td_api::file& file) {
+  // TODO: The local file ID is shit, create content ID that is properly unique
   SPDLOG_INFO("Enqueuing download for file ID {}", file.id_);
   td_api::object_ptr<td_api::downloadFile> downloadFile = td_api::make_object<td_api::downloadFile>();
   downloadFile->file_id_ = file.id_;
@@ -98,8 +99,8 @@ void TelegramRecorder::downloadFile(td_api::file& file) {
       }
       std::string downloadPath = std::filesystem::path(this->config.downloadFolder) / std::filesystem::path(f->local_->path_).filename();
       try {
-        std::filesystem::copy_file(f->local_->path_, downloadPath);
-        this->writeFileToDB(id, downloadPath);
+        std::filesystem::copy_file(f->local_->path_, downloadPath, std::filesystem::copy_options::skip_existing);
+        this->writeFileToDB(f->id_, downloadPath);
       } catch(std::filesystem::filesystem_error& e) {
         SPDLOG_ERROR("Unable to copy file {}: {}", downloadPath, e.what());
       }
