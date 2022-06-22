@@ -59,6 +59,7 @@ You will need:
 - libsdplog-dev
 - libsqlite3-dev
 - libgtest-dev (Optional, only for unit tests)
+- libssl-dev 
 - cmake
 
 
