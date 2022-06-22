@@ -1,13 +1,14 @@
 //
 // Copyright (c) 2022, Imanol-Mikel Barba Sabariego
 // All rights reserved.
-// 
+//
 // Distributed under BSD 3-Clause License. See LICENSE.
 
 #ifndef TELEGRAM_RECORDER_HPP
 #define TELEGRAM_RECORDER_HPP
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <iostream>
 #include <map>
