@@ -284,21 +284,28 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       getUserFullInfo->user_id_ = u->id_;
       this->sendQuery(std::move(getUserFullInfo), [this, u](TDAPIObjectPtr object) {
         if(object) {
-          td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
-          std::string fileOrigin;
           std::string fileOriginID;
-          if(u->profile_photo_ && u->profile_photo_->id_) {
-            fileOrigin = std::to_string(u->id_);
-            std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
-            fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
-            this->downloadFile(*u->profile_photo_->big_, fileOrigin);
+          std::string bio;
+          if(object->get_id() == td_api::error::ID) {
+            td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+            SPDLOG_ERROR("Retrieve full user info for user ID {} failed: {}", u->id_, err->message_);
+          } else {
+            td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
+            std::string fileOrigin;
+            bio = ufi->bio_;
+            if(u->profile_photo_ && u->profile_photo_->id_) {
+              fileOrigin = std::to_string(u->id_);
+              std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
+              fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+              this->downloadFile(*u->profile_photo_->big_, fileOrigin);
+            }
           }
           TelegramUser* user = new TelegramUser;
           user->userID = u->id_;
           user->fullName = u->first_name_ + " " + u->last_name_;
           user->userName = u->username_;
           user->profilePicFileID = fileOriginID;
-          user->bio = ufi->bio_;
+          user->bio = bio;
           std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);
           this->writeUserToDB(userPtr);
           this->userCache.put(user->userID, std::move(userPtr));
