@@ -9,6 +9,7 @@
 
 #include "telegram_recorder.hpp"
 
+std::function<void(TDAPIObjectPtr)> checkAPICallSuccess(std::string callName);
 td_api::int53 getMessageSenderID(std::shared_ptr<td_api::message>& message);
 std::string getMessageText(std::shared_ptr<td_api::message>& message);
 std::string getMessageOrigin(std::shared_ptr<td_api::message>& message);

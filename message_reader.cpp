@@ -15,6 +15,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 #include <spdlog/spdlog.h>
 
+#include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
 unsigned int getNumberOfWordsInString(std::string& text) {
@@ -69,7 +70,7 @@ void TelegramRecorder::runMessageReader() {
         this->toReadQueueMutex.lock();
         td_api::object_ptr<td::td_api::openChat> openChat = td_api::make_object<td_api::openChat>();
         openChat->chat_id_ = chat;
-        this->sendQuery(std::move(openChat), {});
+        this->sendQuery(std::move(openChat), checkAPICallSuccess("openChat"));
         for(auto& message : this->toReadMessageQueue[chat]) {
           double timeToRead = getMessageReadTime(message, this->config);
           this->markMessageAsRead(chat, message->id_);
@@ -77,7 +78,7 @@ void TelegramRecorder::runMessageReader() {
         }
         td_api::object_ptr<td::td_api::closeChat> closeChat = td_api::make_object<td_api::closeChat>();
         closeChat->chat_id_ = chat;
-        this->sendQuery(std::move(closeChat), {});
+        this->sendQuery(std::move(closeChat), checkAPICallSuccess("closeChat"));
         this->toReadMessageQueue.erase(chat);
         this->toReadQueueMutex.unlock();
       }
@@ -105,5 +106,5 @@ void TelegramRecorder::markMessageAsRead(td_api::int53 chatID, td_api::int53 mes
   viewMessages->message_thread_id_ = 0;
   std::vector<td_api::int53> messages = {messageID};
   viewMessages->message_ids_ = std::move(messages);
-  this->sendQuery(std::move(viewMessages), {});
+  this->sendQuery(std::move(viewMessages), checkAPICallSuccess("viewMessages"));
 }

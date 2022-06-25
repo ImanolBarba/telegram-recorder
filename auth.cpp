@@ -11,6 +11,10 @@
 
 auto TelegramRecorder::createAuthQueryHandler() {
   return [this, id = this->authQueryID](TDAPIObjectPtr object) {
+    if(!object) {
+      SPDLOG_ERROR("NULL response received when calling auth query handler for ID {}", id);
+      return;
+    }
     if(id == authQueryID) {
       checkAuthError(std::move(object));
     }

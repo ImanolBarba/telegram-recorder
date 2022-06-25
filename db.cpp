@@ -376,26 +376,33 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
   td_api::object_ptr<td_api::getMessage> getMessage = td_api::make_object<td_api::getMessage>();
   getMessage->chat_id_ = chatID;
   getMessage->message_id_ = messageID;
-  this->sendQuery(std::move(getMessage), [this](TDAPIObjectPtr object) {
-    if(object) {
-      std::shared_ptr<td_api::message> newMessage = std::shared_ptr<td_api::message>(td::move_tl_object_as<td_api::message>(object).release());
-      std::string newText = getMessageText(newMessage);
-      std::string compoundMessageID = std::to_string(newMessage->chat_id_) + ":" + std::to_string(newMessage->id_);
-      SPDLOG_DEBUG("Updating message {}", compoundMessageID);
+  this->sendQuery(std::move(getMessage), [this, messageID](TDAPIObjectPtr object) {
+    if(!object) {
+      SPDLOG_ERROR("NULL response received when calling getMessage for message ID {}", messageID);
+      return;
+    }
+    if(object->get_id() == td_api::error::ID) {
+      td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+      SPDLOG_ERROR("Getting message {} failed: {}", messageID, err->message_);
+      return;
+    }
+    std::shared_ptr<td_api::message> newMessage = std::shared_ptr<td_api::message>(td::move_tl_object_as<td_api::message>(object).release());
+    std::string newText = getMessageText(newMessage);
+    std::string compoundMessageID = std::to_string(newMessage->chat_id_) + ":" + std::to_string(newMessage->id_);
+    SPDLOG_DEBUG("Updating message {}", compoundMessageID);
 
-      int rc;
-      char* errMsg = NULL;
+    int rc;
+    char* errMsg = NULL;
 
-      std::string statement = "UPDATE messages SET message = '" + newText + "' WHERE id = '" + compoundMessageID + "';";
-      SPDLOG_DEBUG("Executing SQL: {}", statement);
+    std::string statement = "UPDATE messages SET message = '" + newText + "' WHERE id = '" + compoundMessageID + "';";
+    SPDLOG_DEBUG("Executing SQL: {}", statement);
 
-      this->toWriteQueueMutex.lock();
-      rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
-      this->toWriteQueueMutex.unlock();
-      if (rc != SQLITE_OK ) {
-        SPDLOG_ERROR("Error inserting data: {}", errMsg);
-        sqlite3_free(errMsg);
-      }
+    this->toWriteQueueMutex.lock();
+    rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+    this->toWriteQueueMutex.unlock();
+    if (rc != SQLITE_OK ) {
+      SPDLOG_ERROR("Error inserting data: {}", errMsg);
+      sqlite3_free(errMsg);
     }
   });
 }

@@ -9,6 +9,20 @@
 #include "hash.hpp"
 #include "telegram_data.hpp"
 
+std::function<void(TDAPIObjectPtr)> checkAPICallSuccess(std::string callName) {
+  return [callName](TDAPIObjectPtr object) {
+    if(!object) {
+      SPDLOG_ERROR("NULL response received when calling {}", callName);
+      return;
+    }
+    if(object->get_id() == td_api::error::ID) {
+      td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+      SPDLOG_ERROR("Call {} failed: {}", callName, err->message_);
+      return;
+    }
+  };
+}
+
 td_api::int53 getMessageSenderID(std::shared_ptr<td_api::message>& message) {
   td_api::int53 senderID;
   td_api::downcast_call(*message->sender_id_,
@@ -103,31 +117,33 @@ void TelegramRecorder::downloadFile(td_api::file& file, std::string& originID) {
   downloadFile->limit_ = 0;
   downloadFile->synchronous_ = true;
   this->sendQuery(std::move(downloadFile), [this, id = file.id_, originID](TDAPIObjectPtr object) {
-    if(object) {
-      if(object->get_id() == td_api::error::ID) {
-        td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
-        SPDLOG_ERROR("Download for file ID {} failed: {}", id, err->message_);
-        return;
-      }
-      SPDLOG_INFO("Download for file ID {} completed", id);
-      td_api::object_ptr<td_api::file> f = td::move_tl_object_as<td_api::file>(object);
-      if(!f->local_->is_downloading_completed_) {
-        SPDLOG_ERROR("Download for file ID {} didn't complete successfully", id);
-        return;
-      }
-      if(f->local_->path_ == "") {
-        SPDLOG_ERROR("File ID {} isn't locally available", id);
-        return;
-      }
-      std::string downloadPath = std::filesystem::path(this->config.downloadFolder) / std::filesystem::path(f->local_->path_).filename();
-      try {
-        std::filesystem::copy_file(f->local_->path_, downloadPath, std::filesystem::copy_options::skip_existing);
-        std::string fileIDStr = std::to_string(f->id_) + ":" + originID;
-        std::string fileID = SHA256(fileIDStr.c_str(), fileIDStr.size());
-        this->writeFileToDB(fileID, downloadPath, originID);
-      } catch(std::filesystem::filesystem_error& e) {
-        SPDLOG_ERROR("Unable to copy file {}: {}", downloadPath, e.what());
-      }
+    if(!object) {
+      SPDLOG_ERROR("NULL response received when downloading file for file ID {}", id);
+      return;
+    }
+    if(object->get_id() == td_api::error::ID) {
+      td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+      SPDLOG_ERROR("Download for file ID {} failed: {}", id, err->message_);
+      return;
+    }
+    SPDLOG_INFO("Download for file ID {} completed", id);
+    td_api::object_ptr<td_api::file> f = td::move_tl_object_as<td_api::file>(object);
+    if(!f->local_->is_downloading_completed_) {
+      SPDLOG_ERROR("Download for file ID {} didn't complete successfully", id);
+      return;
+    }
+    if(f->local_->path_ == "") {
+      SPDLOG_ERROR("File ID {} isn't locally available", id);
+      return;
+    }
+    std::string downloadPath = std::filesystem::path(this->config.downloadFolder) / std::filesystem::path(f->local_->path_).filename();
+    try {
+      std::filesystem::copy_file(f->local_->path_, downloadPath, std::filesystem::copy_options::skip_existing);
+      std::string fileIDStr = std::to_string(f->id_) + ":" + originID;
+      std::string fileID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+      this->writeFileToDB(fileID, downloadPath, originID);
+    } catch(std::filesystem::filesystem_error& e) {
+      SPDLOG_ERROR("Unable to copy file {}: {}", downloadPath, e.what());
     }
   });
 }

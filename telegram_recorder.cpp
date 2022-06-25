@@ -18,8 +18,6 @@
 #include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
-// TODO: Add error handling from API responses in maaaaaaaaaany places
-
 TelegramRecorder::TelegramRecorder() {
     td::ClientManager::execute(td_api::make_object<td_api::setLogVerbosityLevel>(2));
     this->clientManager = std::make_unique<td::ClientManager>();
@@ -40,11 +38,11 @@ void TelegramRecorder::start() {
   readerThread.detach();
   std::thread writerThread(&TelegramRecorder::runDBWriter, this);
   writerThread.detach();
-} 
+}
 
 void TelegramRecorder::runRecorder() {
   SPDLOG_DEBUG("Recorder thread started");
-  this->sendQuery(td_api::make_object<td_api::getOption>("version"), {});
+  this->sendQuery(td_api::make_object<td_api::getOption>("version"), checkAPICallSuccess("version"));
   while(!this->exitFlag.load()) {
     if (this->needRestart) {
       this->restart();
@@ -64,8 +62,8 @@ void TelegramRecorder::runRecorder() {
     }
   }
   SPDLOG_DEBUG("Recorder stopped");
-  this->sendQuery(td_api::make_object<td_api::logOut>(), {});
-  this->sendQuery(td_api::make_object<td_api::close>(), {});
+  this->sendQuery(td_api::make_object<td_api::logOut>(), checkAPICallSuccess("logOut"));
+  this->sendQuery(td_api::make_object<td_api::close>(), checkAPICallSuccess("close"));
 }
 
 void TelegramRecorder::stop() {
@@ -84,7 +82,7 @@ void TelegramRecorder::restart() {
   this->authQueryID = 0;
   this->handlers.clear();
   this->toReadMessageQueue.clear();
-  this->sendQuery(td_api::make_object<td_api::getOption>("version"), {});
+  this->sendQuery(td_api::make_object<td_api::getOption>("version"), checkAPICallSuccess("version"));
 }
 
 void TelegramRecorder::sendQuery(
@@ -214,73 +212,79 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
   td_api::object_ptr<td::td_api::getChat> getChat = td_api::make_object<td_api::getChat>();
   getChat->chat_id_ = chatID;
   this->sendQuery(std::move(getChat), [this, chatID](TDAPIObjectPtr object) {
-    if(object) {
-      if(object->get_id() == td_api::error::ID) {
-        td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
-        SPDLOG_ERROR("Retrieve chat info for chat ID {} failed: {}", chatID, err->message_);
-        return;
-      }
-      std::shared_ptr<td_api::chat> c = std::shared_ptr<td_api::chat>(td::move_tl_object_as<td_api::chat>(object).release());
-      std::string fileOrigin;
-      std::string fileOriginID;
-      if(c->photo_) {
-        fileOrigin = std::to_string(c->id_);
-        std::string fileIDStr = std::to_string(c->photo_->big_->id_) + ":" + fileOrigin;
-        fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
-        this->downloadFile(*c->photo_->big_, fileOrigin);
-      }
+    if(!object) {
+      SPDLOG_ERROR("NULL response received when calling getChat for chat ID {}", chatID);
+      return;
+    }
+    if(object->get_id() == td_api::error::ID) {
+      td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+      SPDLOG_ERROR("Retrieve chat info for chat ID {} failed: {}", chatID, err->message_);
+      return;
+    }
+    std::shared_ptr<td_api::chat> c = std::shared_ptr<td_api::chat>(td::move_tl_object_as<td_api::chat>(object).release());
+    std::string fileOrigin;
+    std::string fileOriginID;
+    if(c->photo_) {
+      fileOrigin = std::to_string(c->id_);
+      std::string fileIDStr = std::to_string(c->photo_->big_->id_) + ":" + fileOrigin;
+      fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+      this->downloadFile(*c->photo_->big_, fileOrigin);
+    }
+    
+    TelegramChat* chat = new TelegramChat;
+    chat->chatID = c->id_;
+    chat->name = c->title_;
+    chat->about = "";
+    chat->profilePicFileID = fileOriginID;
+    std::unique_ptr<TelegramChat> chatPtr = std::unique_ptr<TelegramChat>(chat);
+
+    if(c->type_->get_id() == td_api::chatTypeSupergroup::ID) {
+      td_api::object_ptr<td::td_api::chatTypeSupergroup> chatTypeSupergroup = td::move_tl_object_as<td_api::chatTypeSupergroup>(c->type_);
+      td_api::object_ptr<td::td_api::getSupergroupFullInfo> getSupergroupFullInfo = td_api::make_object<td_api::getSupergroupFullInfo>();
+      getSupergroupFullInfo->supergroup_id_ = chatTypeSupergroup->supergroup_id_;
       
-      TelegramChat* chat = new TelegramChat;
-      chat->chatID = c->id_;
-      chat->name = c->title_;
-      chat->about = "";
-      chat->profilePicFileID = fileOriginID;
-      std::unique_ptr<TelegramChat> chatPtr = std::unique_ptr<TelegramChat>(chat);
+      chatPtr->groupID = chatTypeSupergroup->supergroup_id_;
+      this->writeChatToDB(chatPtr);
+      this->chatCache.put(chat->chatID, std::move(chatPtr));
+    
+      this->sendQuery(std::move(getSupergroupFullInfo), [this, groupID = chatTypeSupergroup->supergroup_id_](TDAPIObjectPtr object) {
+        if(!object) {
+          SPDLOG_ERROR("NULL response received when calling getSupergroupFullInfo for group ID {}", groupID);
+          return;
+        }
+        if(object->get_id() == td_api::error::ID) {
+          td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+          SPDLOG_ERROR("Retrieve group info for group ID {} failed: {}", groupID, err->message_);
+          return;
+        }
+        td_api::object_ptr<td::td_api::supergroupFullInfo> sgfi = td::move_tl_object_as<td_api::supergroupFullInfo>(object);
+        this->updateGroupData(td::move_tl_object_as<td_api::Object>(sgfi), groupID);
+      });
+    } else if(c->type_->get_id() == td_api::chatTypeBasicGroup::ID) {
+      td_api::object_ptr<td::td_api::chatTypeBasicGroup> chatTypeBasicGroup = td::move_tl_object_as<td_api::chatTypeBasicGroup>(c->type_);
+      td_api::object_ptr<td::td_api::getBasicGroupFullInfo> getBasicGroupFullInfo = td_api::make_object<td_api::getBasicGroupFullInfo>();
+      getBasicGroupFullInfo->basic_group_id_ = chatTypeBasicGroup->basic_group_id_;
 
-      if(c->type_->get_id() == td_api::chatTypeSupergroup::ID) {
-        td_api::object_ptr<td::td_api::chatTypeSupergroup> chatTypeSupergroup = td::move_tl_object_as<td_api::chatTypeSupergroup>(c->type_);
-        td_api::object_ptr<td::td_api::getSupergroupFullInfo> getSupergroupFullInfo = td_api::make_object<td_api::getSupergroupFullInfo>();
-        getSupergroupFullInfo->supergroup_id_ = chatTypeSupergroup->supergroup_id_;
-        
-        chatPtr->groupID = chatTypeSupergroup->supergroup_id_;
-        this->writeChatToDB(chatPtr);
-        this->chatCache.put(chat->chatID, std::move(chatPtr));
-      
-        this->sendQuery(std::move(getSupergroupFullInfo), [this, groupID = chatTypeSupergroup->supergroup_id_](TDAPIObjectPtr object) {
-          if(object) {
-            if(object->get_id() == td_api::error::ID) {
-              td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
-              SPDLOG_ERROR("Retrieve group info for group ID {} failed: {}", groupID, err->message_);
-              return;
-            }
-            td_api::object_ptr<td::td_api::supergroupFullInfo> sgfi = td::move_tl_object_as<td_api::supergroupFullInfo>(object);
-            this->updateGroupData(td::move_tl_object_as<td_api::Object>(sgfi), groupID);
-          }
-        });
-      } else if(c->type_->get_id() == td_api::chatTypeBasicGroup::ID) {
-        td_api::object_ptr<td::td_api::chatTypeBasicGroup> chatTypeBasicGroup = td::move_tl_object_as<td_api::chatTypeBasicGroup>(c->type_);
-        td_api::object_ptr<td::td_api::getBasicGroupFullInfo> getBasicGroupFullInfo = td_api::make_object<td_api::getBasicGroupFullInfo>();
-        getBasicGroupFullInfo->basic_group_id_ = chatTypeBasicGroup->basic_group_id_;
+      chatPtr->groupID = chatTypeBasicGroup->basic_group_id_;
+      this->writeChatToDB(chatPtr);
+      this->chatCache.put(chat->chatID, std::move(chatPtr));
 
-        chatPtr->groupID = chatTypeBasicGroup->basic_group_id_;
-        this->writeChatToDB(chatPtr);
-        this->chatCache.put(chat->chatID, std::move(chatPtr));
-
-        this->sendQuery(std::move(getBasicGroupFullInfo), [this, groupID = chatTypeBasicGroup->basic_group_id_](TDAPIObjectPtr object) {
-          if(object) {
-            if(object->get_id() == td_api::error::ID) {
-              td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
-              SPDLOG_ERROR("Retrieve group info for group ID {} failed: {}", groupID, err->message_);
-              return;
-            }
-            td_api::object_ptr<td::td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
-            this->updateGroupData(td::move_tl_object_as<td_api::Object>(bgfi), groupID);
-          }
-        });
-      } else {
-        this->writeChatToDB(chatPtr);
-        this->chatCache.put(chat->chatID, std::move(chatPtr));
-      }
+      this->sendQuery(std::move(getBasicGroupFullInfo), [this, groupID = chatTypeBasicGroup->basic_group_id_](TDAPIObjectPtr object) {
+        if(!object) {
+          SPDLOG_ERROR("NULL response received when calling getBasicGroupFullInfo for group ID {}", groupID);
+          return;
+        }
+        if(object->get_id() == td_api::error::ID) {
+          td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+          SPDLOG_ERROR("Retrieve group info for group ID {} failed: {}", groupID, err->message_);
+          return;
+        }
+        td_api::object_ptr<td::td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
+        this->updateGroupData(td::move_tl_object_as<td_api::Object>(bgfi), groupID);
+      });
+    } else {
+      this->writeChatToDB(chatPtr);
+      this->chatCache.put(chat->chatID, std::move(chatPtr));
     }
   });
 }
@@ -289,45 +293,54 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
   td_api::object_ptr<td_api::getUser> getUser = td_api::make_object<td_api::getUser>();
   getUser->user_id_ = userID;
   this->sendQuery(std::move(getUser), [this, userID](TDAPIObjectPtr object) {
-    if(object) {
-      if(object->get_id() == td_api::error::ID) {
-        td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
-        SPDLOG_ERROR("Retrieve user info for user ID {} failed: {}", userID, err->message_);
+    if(!object) {
+      SPDLOG_ERROR("NULL response received when calling getUser for user ID {}", userID);
+      return;
+    }
+    if(object->get_id() == td_api::error::ID) {
+      td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+      SPDLOG_ERROR("Retrieve user info for user ID {} failed: {}", userID, err->message_);
+      return;
+    }
+    std::shared_ptr<td_api::user> u = std::shared_ptr<td_api::user>(td::move_tl_object_as<td_api::user>(object).release());
+    // To get the bio...
+    td_api::object_ptr<td_api::getUserFullInfo> getUserFullInfo = td_api::make_object<td_api::getUserFullInfo>();
+    getUserFullInfo->user_id_ = u->id_;
+    this->sendQuery(std::move(getUserFullInfo), [this, u](TDAPIObjectPtr object) {
+      if(!object) {
+        SPDLOG_ERROR("NULL response received when calling getUserFullInfo for user ID {}", u->id_);
         return;
       }
-      std::shared_ptr<td_api::user> u = std::shared_ptr<td_api::user>(td::move_tl_object_as<td_api::user>(object).release());
-      // To get the bio...
-      td_api::object_ptr<td_api::getUserFullInfo> getUserFullInfo = td_api::make_object<td_api::getUserFullInfo>();
-      getUserFullInfo->user_id_ = u->id_;
-      this->sendQuery(std::move(getUserFullInfo), [this, u](TDAPIObjectPtr object) {
-        if(object) {
-          std::string fileOriginID;
-          std::string bio;
-          if(object->get_id() == td_api::error::ID) {
-            td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
-            SPDLOG_ERROR("Retrieve full user info for user ID {} failed: {}", u->id_, err->message_);
-          } else {
-            td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
-            std::string fileOrigin;
-            bio = ufi->bio_;
-            if(u->profile_photo_ && u->profile_photo_->id_) {
-              fileOrigin = std::to_string(u->id_);
-              std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
-              fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
-              this->downloadFile(*u->profile_photo_->big_, fileOrigin);
-            }
-          }
-          TelegramUser* user = new TelegramUser;
-          user->userID = u->id_;
-          user->fullName = u->first_name_ + " " + u->last_name_;
-          user->userName = u->username_;
-          user->profilePicFileID = fileOriginID;
-          user->bio = bio;
-          std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);
-          this->writeUserToDB(userPtr);
-          this->userCache.put(user->userID, std::move(userPtr));
-        }
-      });
+      if(object->get_id() == td_api::error::ID) {
+      td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+      SPDLOG_ERROR("Retrieve user full info for user ID {} failed: {}", u->id_, err->message_);
+      return;
     }
+      std::string fileOriginID;
+      std::string bio;
+      if(object->get_id() == td_api::error::ID) {
+        td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+        SPDLOG_ERROR("Retrieve full user info for user ID {} failed: {}", u->id_, err->message_);
+      } else {
+        td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
+        std::string fileOrigin;
+        bio = ufi->bio_;
+        if(u->profile_photo_ && u->profile_photo_->id_) {
+          fileOrigin = std::to_string(u->id_);
+          std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
+          fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+          this->downloadFile(*u->profile_photo_->big_, fileOrigin);
+        }
+      }
+      TelegramUser* user = new TelegramUser;
+      user->userID = u->id_;
+      user->fullName = u->first_name_ + " " + u->last_name_;
+      user->userName = u->username_;
+      user->profilePicFileID = fileOriginID;
+      user->bio = bio;
+      std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);
+      this->writeUserToDB(userPtr);
+      this->userCache.put(user->userID, std::move(userPtr));
+    });
   });
 }
