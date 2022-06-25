@@ -221,7 +221,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
 }
 
 std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53 chatID) {
-  std::string statement = "SELECT name, about, pic_file_id FROM chats WHERE chat_id='" + std::to_string(chatID) + "';";
+  std::string statement = "SELECT name, group_id, about, pic_file_id FROM chats WHERE chat_id='" + std::to_string(chatID) + "';";
   char *errMsg = NULL;
   int rc;
   TelegramChat *chat = NULL;
@@ -240,8 +240,9 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
     chat = new TelegramChat;
     chat->chatID = chatID;
     chat->name = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
-    chat->about = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
-    chat->profilePicFileID = sqlite3_column_int(stmt, 2);
+    chat->groupID = sqlite3_column_int(stmt, 1);
+    chat->about = sqlite3_column_text(stmt, 2) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))) : "";
+    chat->profilePicFileID = sqlite3_column_int(stmt, 3);
   }
   if (rc != SQLITE_DONE) {
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
@@ -271,8 +272,8 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
     user = new TelegramUser;
     user->userID = userID;
     user->fullName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
-    user->userName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
-    user->bio = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+    user->userName = sqlite3_column_text(stmt, 1) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1))) : "";
+    user->bio = sqlite3_column_text(stmt, 2) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))) : "";
     user->profilePicFileID = sqlite3_column_int(stmt, 3);
   }
   if (rc != SQLITE_DONE) {
