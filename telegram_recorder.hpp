@@ -43,6 +43,7 @@ typedef struct TelegramUser {
 
 typedef struct TelegramChat {
   td_api::int53 chatID;
+  td_api::int53 groupID;
   std::string name;
   std::string about;
   std::string profilePicFileID;
@@ -75,6 +76,7 @@ class TelegramRecorder {
     std::unique_ptr<TelegramChat> retrieveChatFromDB(td_api::int53 chatID);
     std::unique_ptr<TelegramUser> retrieveUserFromDB(td_api::int53 userID);
     void retrieveAndWriteChatFromTelegram(td_api::int53 chatID);
+    bool updateGroupData(TDAPIObjectPtr groupData, td_api::int53 groupID);
     void retrieveAndWriteUserFromTelegram(td_api::int53 userID);
     bool writeUserToDB(std::unique_ptr<TelegramUser>& user);
     bool writeChatToDB(std::unique_ptr<TelegramChat>& chat);

@@ -22,8 +22,8 @@ bool checkTableExists(sqlite3* db, std::string tableName) {
   sqlite3_stmt *stmt;
   rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
-      SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
-      return false;
+    SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
+    return false;
   }
   SPDLOG_DEBUG("Executing SQL: {}", statement);
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -62,8 +62,8 @@ bool TelegramRecorder::initDB() {
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
     if (rc != SQLITE_OK ) {
       SPDLOG_ERROR("Error creating messages table: {}", errMsg);
-        sqlite3_free(errMsg);
-        return false;
+      sqlite3_free(errMsg);
+      return false;
     }
   }
   if(!checkTableExists(this->db, std::move("users"))) {
@@ -78,13 +78,14 @@ bool TelegramRecorder::initDB() {
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
     if (rc != SQLITE_OK ) {
       SPDLOG_ERROR("Error creating users table: {}", errMsg);
-        sqlite3_free(errMsg);
-        return false;
+      sqlite3_free(errMsg);
+      return false;
     }
   }
   if(!checkTableExists(this->db, std::move("chats"))) {
     std::string statement = "CREATE TABLE chats("
                               "chat_id INTEGER PRIMARY KEY,"
+                              "group_id INTEGER,"
                               "name TEXT,"
                               "about TEXT,"
                               "pic_file_id TEXT"
@@ -93,8 +94,8 @@ bool TelegramRecorder::initDB() {
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
     if (rc != SQLITE_OK ) {
       SPDLOG_ERROR("Error creating chats table: {}", errMsg);
-        sqlite3_free(errMsg);
-        return false;
+      sqlite3_free(errMsg);
+      return false;
     }
   }
   if(!checkTableExists(this->db, std::move("files"))) {
@@ -107,8 +108,8 @@ bool TelegramRecorder::initDB() {
     rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
     if (rc != SQLITE_OK ) {
       SPDLOG_ERROR("Error creating files table: {}", errMsg);
-        sqlite3_free(errMsg);
-        return false;
+      sqlite3_free(errMsg);
+      return false;
     }
   }
   return true;
@@ -209,8 +210,8 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
-      sqlite3_free(errMsg);
-      return false;
+    sqlite3_free(errMsg);
+    return false;
   }
   return true;
 }
@@ -304,8 +305,8 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
   this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
-      sqlite3_free(errMsg);
-      return false;
+    sqlite3_free(errMsg);
+    return false;
   }
   return true;
 }
@@ -317,12 +318,14 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
 
   std::string statement = "REPLACE INTO chats ("
                             "chat_id,"
+                            "group_id,"
                             "name,"
                             "about,"
                             "pic_file_id"
                           ") VALUES "
                           "(";
   statement += std::to_string(chat->chatID) + ",";
+  statement += std::to_string(chat->groupID) + ",";
   statement += "'" + chat->name + "',";
   statement += "'" + chat->about + "',";
   statement += "'" + chat->profilePicFileID + "'";
@@ -334,8 +337,8 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
   this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
-      sqlite3_free(errMsg);
-      return false;
+    sqlite3_free(errMsg);
+    return false;
   }
   return true;
 }
@@ -362,8 +365,8 @@ bool TelegramRecorder::writeFileToDB(std::string& fileID, std::string& downloade
   this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
-      sqlite3_free(errMsg);
-      return false;
+    sqlite3_free(errMsg);
+    return false;
   }
   return true;
 }
@@ -390,7 +393,7 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
       this->toWriteQueueMutex.unlock();
       if (rc != SQLITE_OK ) {
         SPDLOG_ERROR("Error inserting data: {}", errMsg);
-          sqlite3_free(errMsg);
+        sqlite3_free(errMsg);
       }
     }
   });
@@ -420,8 +423,48 @@ bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_ap
   this->toWriteQueueMutex.unlock();
   if (rc != SQLITE_OK ) {
     SPDLOG_ERROR("Error inserting data: {}", errMsg);
-      sqlite3_free(errMsg);
-      return false;
+    sqlite3_free(errMsg);
+    return false;
   }
   return true;
+}
+
+bool TelegramRecorder::updateGroupData(TDAPIObjectPtr groupData, td_api::int53 groupID) {
+  int rc;
+  char* errMsg = NULL;
+
+  std::string description;
+
+  if(groupData->get_id() == td_api::supergroupFullInfo::ID) {
+    td_api::object_ptr<td_api::supergroupFullInfo> sgfi = td::move_tl_object_as<td_api::supergroupFullInfo>(groupData);
+    SPDLOG_DEBUG("Updating group data for supergroup {}", groupID);
+    description = sgfi->description_;
+  } else if(groupData->get_id() == td_api::basicGroupFullInfo::ID) {
+    td_api::object_ptr<td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(groupData);
+    SPDLOG_DEBUG("Updating group data for supergroup {}", groupID);
+    description = bgfi->description_;
+  } else {
+    SPDLOG_ERROR("Unknown group data type to update: {}", groupData->get_id());
+    return false;
+  }
+
+  std::string statement = "UPDATE chats SET about = '" + description + "' WHERE group_id = " + std::to_string(groupID) + ";";
+  SPDLOG_DEBUG("Executing SQL: {}", statement);
+
+  this->toWriteQueueMutex.lock();
+  rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
+  this->toWriteQueueMutex.unlock();
+  if (rc != SQLITE_OK ) {
+    SPDLOG_ERROR("Error updating data: {}", errMsg);
+    sqlite3_free(errMsg);
+    return false;
+  }
+
+  if(!sqlite3_changes(this->db)) {
+    SPDLOG_ERROR("No chat was found with group ID: {}", groupID);
+    return false;
+  }
+
+  return true;
+
 }

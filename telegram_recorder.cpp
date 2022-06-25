@@ -170,15 +170,13 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
         // NOTE: This update is not being triggered when the description is 
         // changed, we only get this info if the picture changes and a couple 
         // more occasions
-        // TODO: supergroup ID != chat ID
         SPDLOG_DEBUG("Received update: updateSupergroupFullInfo");
-        this->retrieveAndWriteChatFromTelegram(-1 * (1e12 + updateSupergroupFullInfo.supergroup_id_));
+        this->updateGroupData(td::move_tl_object_as<td_api::Object>(updateSupergroupFullInfo.supergroup_full_info_), updateSupergroupFullInfo.supergroup_id_);
       },
       [this](td_api::updateBasicGroupFullInfo& updateBasicGroupFullInfo) {
         // Extended info of a group changed
-        // TODO: basic group ID != chat ID
         SPDLOG_DEBUG("Received update: updateBasicGroupFullInfo");
-        this->retrieveAndWriteChatFromTelegram(-1 * updateBasicGroupFullInfo.basic_group_id_);
+        this->updateGroupData(td::move_tl_object_as<td_api::Object>(updateBasicGroupFullInfo.basic_group_full_info_), updateBasicGroupFullInfo.basic_group_id_);
       },
       [this](td_api::updateNewMessage& updateNewMessage) {
         // A new message was received
@@ -223,46 +221,65 @@ void TelegramRecorder::retrieveAndWriteChatFromTelegram(td_api::int53 chatID) {
         return;
       }
       std::shared_ptr<td_api::chat> c = std::shared_ptr<td_api::chat>(td::move_tl_object_as<td_api::chat>(object).release());
-      auto chatExtraInfoCallback = [this, c](TDAPIObjectPtr object) {
-        if(object) {
-          std::string description;
-          std::string fileOrigin;
-          std::string fileOriginID;
-          if(c->photo_) {
-            fileOrigin = std::to_string(c->id_);
-            std::string fileIDStr = std::to_string(c->photo_->big_->id_) + ":" + fileOrigin;
-            fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
-            this->downloadFile(*c->photo_->big_, fileOrigin);
-          }
-          // Group full info's description is only updated after the group is 
-          // opened when messages are read or the profile pic is updated
-          if(object->get_id() == td_api::basicGroupFullInfo::ID) {
-            td::tl::unique_ptr<td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
-            description = bgfi->description_;
-          } else if(object->get_id() == td_api::supergroupFullInfo::ID) {
-            td::tl::unique_ptr<td_api::supergroupFullInfo> sgfi = td::move_tl_object_as<td_api::supergroupFullInfo>(object);
-            description = sgfi->description_;
-          }
-          TelegramChat* chat = new TelegramChat;
-          chat->chatID = c->id_;
-          chat->name = c->title_;
-          chat->about = description;
-          chat->profilePicFileID = fileOriginID;
-          std::unique_ptr<TelegramChat> chatPtr = std::unique_ptr<TelegramChat>(chat);
-          this->writeChatToDB(chatPtr);
-          this->chatCache.put(chat->chatID, std::move(chatPtr));
-        }
-      };
+      std::string fileOrigin;
+      std::string fileOriginID;
+      if(c->photo_) {
+        fileOrigin = std::to_string(c->id_);
+        std::string fileIDStr = std::to_string(c->photo_->big_->id_) + ":" + fileOrigin;
+        fileOriginID = SHA256(fileIDStr.c_str(), fileIDStr.size());
+        this->downloadFile(*c->photo_->big_, fileOrigin);
+      }
+      
+      TelegramChat* chat = new TelegramChat;
+      chat->chatID = c->id_;
+      chat->name = c->title_;
+      chat->about = "";
+      chat->profilePicFileID = fileOriginID;
+      std::unique_ptr<TelegramChat> chatPtr = std::unique_ptr<TelegramChat>(chat);
+
       if(c->type_->get_id() == td_api::chatTypeSupergroup::ID) {
-        // TODO: supergroup ID != chat ID
+        td_api::object_ptr<td::td_api::chatTypeSupergroup> chatTypeSupergroup = td::move_tl_object_as<td_api::chatTypeSupergroup>(c->type_);
         td_api::object_ptr<td::td_api::getSupergroupFullInfo> getSupergroupFullInfo = td_api::make_object<td_api::getSupergroupFullInfo>();
-        getSupergroupFullInfo->supergroup_id_ = -1 * (1e12 + c->id_);
-        this->sendQuery(std::move(getSupergroupFullInfo), chatExtraInfoCallback);
-      } else {
-        // TODO: basic group ID != chat ID
+        getSupergroupFullInfo->supergroup_id_ = chatTypeSupergroup->supergroup_id_;
+        
+        chatPtr->groupID = chatTypeSupergroup->supergroup_id_;
+        this->writeChatToDB(chatPtr);
+        this->chatCache.put(chat->chatID, std::move(chatPtr));
+      
+        this->sendQuery(std::move(getSupergroupFullInfo), [this, groupID = chatTypeSupergroup->supergroup_id_](TDAPIObjectPtr object) {
+          if(object) {
+            if(object->get_id() == td_api::error::ID) {
+              td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+              SPDLOG_ERROR("Retrieve group info for group ID {} failed: {}", groupID, err->message_);
+              return;
+            }
+            td_api::object_ptr<td::td_api::supergroupFullInfo> sgfi = td::move_tl_object_as<td_api::supergroupFullInfo>(object);
+            this->updateGroupData(td::move_tl_object_as<td_api::Object>(sgfi), groupID);
+          }
+        });
+      } else if(c->type_->get_id() == td_api::chatTypeBasicGroup::ID) {
+        td_api::object_ptr<td::td_api::chatTypeBasicGroup> chatTypeBasicGroup = td::move_tl_object_as<td_api::chatTypeBasicGroup>(c->type_);
         td_api::object_ptr<td::td_api::getBasicGroupFullInfo> getBasicGroupFullInfo = td_api::make_object<td_api::getBasicGroupFullInfo>();
-        getBasicGroupFullInfo->basic_group_id_ = -1 * c->id_;
-        this->sendQuery(std::move(getBasicGroupFullInfo), chatExtraInfoCallback);
+        getBasicGroupFullInfo->basic_group_id_ = chatTypeBasicGroup->basic_group_id_;
+
+        chatPtr->groupID = chatTypeBasicGroup->basic_group_id_;
+        this->writeChatToDB(chatPtr);
+        this->chatCache.put(chat->chatID, std::move(chatPtr));
+
+        this->sendQuery(std::move(getBasicGroupFullInfo), [this, groupID = chatTypeBasicGroup->basic_group_id_](TDAPIObjectPtr object) {
+          if(object) {
+            if(object->get_id() == td_api::error::ID) {
+              td_api::object_ptr<td_api::error> err = td::move_tl_object_as<td_api::error>(object);
+              SPDLOG_ERROR("Retrieve group info for group ID {} failed: {}", groupID, err->message_);
+              return;
+            }
+            td_api::object_ptr<td::td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(object);
+            this->updateGroupData(td::move_tl_object_as<td_api::Object>(bgfi), groupID);
+          }
+        });
+      } else {
+        this->writeChatToDB(chatPtr);
+        this->chatCache.put(chat->chatID, std::move(chatPtr));
       }
     }
   });
