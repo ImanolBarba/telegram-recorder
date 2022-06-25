@@ -295,9 +295,9 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
                           "(";
   statement += std::to_string(user->userID) + ",";
   statement += "'" + user->fullName + "',";
-  statement += "'" + user->userName + "',";
-  statement += "'" + user->bio + "',";
-  statement += "'" + user->profilePicFileID + "'";
+  statement += (user->userName == "" ? "NULL" : "'" + user->userName + "'") + ",";
+  statement += (user->bio == "" ? "NULL" : "'" + user->bio + "'") + ",";
+  statement += (user->profilePicFileID == "" ? "NULL" : "'" + user->profilePicFileID + "'");
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
@@ -326,10 +326,10 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
                           ") VALUES "
                           "(";
   statement += std::to_string(chat->chatID) + ",";
-  statement += std::to_string(chat->groupID) + ",";
+  statement += (chat->groupID ? std::to_string(chat->groupID) : "NULL") + ",";
   statement += "'" + chat->name + "',";
-  statement += "'" + chat->about + "',";
-  statement += "'" + chat->profilePicFileID + "'";
+  statement += (chat->about == "" ? "NULL" : "'" + chat->about + "'") + ",";
+  statement += (chat->profilePicFileID == "" ? "NULL" : "'" + chat->profilePicFileID + "'");
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
@@ -442,7 +442,7 @@ bool TelegramRecorder::updateGroupData(TDAPIObjectPtr groupData, td_api::int53 g
     description = sgfi->description_;
   } else if(groupData->get_id() == td_api::basicGroupFullInfo::ID) {
     td_api::object_ptr<td_api::basicGroupFullInfo> bgfi = td::move_tl_object_as<td_api::basicGroupFullInfo>(groupData);
-    SPDLOG_DEBUG("Updating group data for supergroup {}", groupID);
+    SPDLOG_DEBUG("Updating group data for basic group {}", groupID);
     description = bgfi->description_;
   } else {
     SPDLOG_ERROR("Unknown group data type to update: {}", groupData->get_id());
