@@ -167,6 +167,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   int32_t msgType = message->content_->get_id();
   td_api::int53 senderID = getMessageSenderID(message);
   std::string text = getMessageText(message);
+  std::string origin = getMessageOrigin(message);
   std::string compoundMessageID = std::to_string(message->chat_id_) + ":" + std::to_string(message->id_);
   
   std::string fileOriginID;
@@ -203,7 +204,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   statement += std::to_string(message->chat_id_) + ",";
   statement += std::to_string(senderID) + ",";
   statement += (message->reply_to_message_id_ ? ("'" + std::to_string(message->reply_in_chat_id_) + ":" + std::to_string(message->reply_to_message_id_) + "'") : "NULL") + ",";
-  statement += (message->forward_info_ == NULL ? "NULL" : (std::to_string(message->forward_info_->from_chat_id_) + ":" + std::to_string(message->forward_info_->from_message_id_)));
+  statement += (origin == "" ? "NULL" : ("'" + origin + "'"));
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
