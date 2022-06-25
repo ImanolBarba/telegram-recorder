@@ -73,7 +73,7 @@ void TelegramRecorder::runMessageReader() {
         this->sendQuery(std::move(openChat), checkAPICallSuccess("openChat"));
         for(auto& message : this->toReadMessageQueue[chat]) {
           double timeToRead = getMessageReadTime(message, this->config);
-          this->markMessageAsRead(chat, message->id_);
+          this->markMessageAsRead(message);
           std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(timeToRead * 1000)));
         }
         td_api::object_ptr<td::td_api::closeChat> closeChat = td_api::make_object<td_api::closeChat>();
@@ -97,14 +97,12 @@ void TelegramRecorder::enqueueMessageToRead(std::shared_ptr<td_api::message>& me
   this->toReadQueueMutex.unlock();
 }
 
-void TelegramRecorder::markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID) {
-  SPDLOG_DEBUG("Marking message {} from chat {} as read", messageID, chatID);
+void TelegramRecorder::markMessageAsRead(std::shared_ptr<td_api::message>& message) {
+  SPDLOG_DEBUG("Marking message {} from chat {} as read", message->id_, message->chat_id_);
   td_api::object_ptr<td::td_api::viewMessages> viewMessages = td_api::make_object<td_api::viewMessages>();
-  viewMessages->chat_id_ = chatID;
-  // Message thread IDs are conversations that happen in certain channel's posts (the ones that allow it).
-  // TODO: include this feature at some point
-  viewMessages->message_thread_id_ = 0;
-  std::vector<td_api::int53> messages = {messageID};
+  viewMessages->chat_id_ = message->chat_id_;
+  viewMessages->message_thread_id_ = message->message_thread_id_;
+  std::vector<td_api::int53> messages = {message->id_};
   viewMessages->message_ids_ = std::move(messages);
   this->sendQuery(std::move(viewMessages), checkAPICallSuccess("viewMessages"));
 }

@@ -71,7 +71,7 @@ class TelegramRecorder {
     void enqueueMessageToRead(std::shared_ptr<td_api::message>& message);
     void enqueueMessageToWrite(std::shared_ptr<td_api::message>& message);
     void runMessageReader();
-    void markMessageAsRead(td_api::int53 chatID, td_api::int53 messageID);
+    void markMessageAsRead(std::shared_ptr<td_api::message>& message);
     bool writeMessageToDB(std::shared_ptr<td_api::message>& message);
     std::unique_ptr<TelegramChat> retrieveChatFromDB(td_api::int53 chatID);
     std::unique_ptr<TelegramUser> retrieveUserFromDB(td_api::int53 userID);
