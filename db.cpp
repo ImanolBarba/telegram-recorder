@@ -49,6 +49,7 @@ bool TelegramRecorder::initDB() {
   if(!checkTableExists(this->db, std::move("messages"))) {
     std::string statement = "CREATE TABLE messages("
                               "id TEXT PRIMARY KEY,"
+                              "timestamp INTEGER,"
                               "message TEXT,"
                               "message_type INTEGER,"
                               "content_file_id TEXT,"
@@ -188,6 +189,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   // We don't do REPLACE here because we rely on the hidden rowid column to preserve message order
   std::string statement = "INSERT INTO messages ("
                             "id,"
+                            "timestamp,"
                             "message,"
                             "message_type,"
                             "content_file_id,"
@@ -198,6 +200,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
                           ") VALUES "
                           "(";
   statement += "'" + compoundMessageID + "',";
+  statement += std::to_string(message->date_) + ",";
   statement += "'" + text + "',";
   statement += std::to_string(msgType) + ",";
   statement += (fileOriginID == "" ? "NULL" : "'" + fileOriginID + "'") + ",";
@@ -372,11 +375,11 @@ bool TelegramRecorder::writeFileToDB(std::string& fileID, std::string& downloade
   return true;
 }
 
-void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 messageID) {
+void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 messageID, td_api::int32 editDate) {
   td_api::object_ptr<td_api::getMessage> getMessage = td_api::make_object<td_api::getMessage>();
   getMessage->chat_id_ = chatID;
   getMessage->message_id_ = messageID;
-  this->sendQuery(std::move(getMessage), [this, messageID](TDAPIObjectPtr object) {
+  this->sendQuery(std::move(getMessage), [this, messageID, editDate](TDAPIObjectPtr object) {
     if(!object) {
       SPDLOG_ERROR("NULL response received when calling getMessage for message ID {}", messageID);
       return;
@@ -394,7 +397,7 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
     int rc;
     char* errMsg = NULL;
 
-    std::string statement = "UPDATE messages SET message = '" + newText + "' WHERE id = '" + compoundMessageID + "';";
+    std::string statement = "UPDATE messages SET message = '" + newText + "', timestamp = " + std::to_string(editDate) + " WHERE id = '" + compoundMessageID + "';";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
 
     this->toWriteQueueMutex.lock();
@@ -407,7 +410,7 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
   });
 }
 
-bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_api::object_ptr<td_api::MessageContent>& newContent) {
+bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_api::object_ptr<td_api::MessageContent>& newContent, td_api::int32 editDate) {
   SPDLOG_DEBUG("Updating content from message ID {}", compoundMessageID);
 
   td_api::file* f = getMessageContentFileReference(newContent);
@@ -423,7 +426,7 @@ bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_ap
   int rc;
   char* errMsg = NULL;
 
-  std::string statement = "UPDATE messages SET content_file_id = '" + fileOriginID + "' WHERE id = '" + compoundMessageID + "';";
+  std::string statement = "UPDATE messages SET content_file_id = '" + fileOriginID + "', timestamp = " + std::to_string(editDate) + " WHERE id = '" + compoundMessageID + "';";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();

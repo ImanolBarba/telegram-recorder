@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <thread>
 
+#include <time.h>
 #include <unistd.h>
 
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
@@ -151,12 +152,12 @@ void TelegramRecorder::processUpdate(TDAPIObjectPtr update) {
         // Message content changed
         SPDLOG_DEBUG("Received update: updateMessageContent");
         std::string compoundMessageID = std::to_string(updateMessageContent.chat_id_) + ":" + std::to_string(updateMessageContent.message_id_);
-        this->updateMessageContent(compoundMessageID, updateMessageContent.new_content_);
+        this->updateMessageContent(compoundMessageID, updateMessageContent.new_content_, td_api::int32(time(0)));
       },
       [this](td_api::updateMessageEdited& updateMessageEdited) {
         // Message was edited
         SPDLOG_DEBUG("Received update: updateMessageEdited");
-        this->updateMessageText(updateMessageEdited.chat_id_, updateMessageEdited.message_id_);
+        this->updateMessageText(updateMessageEdited.chat_id_, updateMessageEdited.message_id_, updateMessageEdited.edit_date_);
       },
       [this](td_api::updateUserFullInfo& updateUserFullInfo) {
         // Extended info of an user changed
