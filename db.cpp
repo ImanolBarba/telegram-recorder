@@ -407,6 +407,11 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
       SPDLOG_ERROR("Error inserting data: {}", errMsg);
       sqlite3_free(errMsg);
     }
+
+    if(!sqlite3_changes(this->db)) {
+      SPDLOG_ERROR("No message was found with message ID: {}", compoundMessageID);
+      return;
+    }
   });
 }
 
@@ -437,6 +442,12 @@ bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_ap
     sqlite3_free(errMsg);
     return false;
   }
+
+  if(!sqlite3_changes(this->db)) {
+    SPDLOG_ERROR("No message was found with message ID: {}", compoundMessageID);
+    return false;
+  }
+
   return true;
 }
 
