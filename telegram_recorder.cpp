@@ -335,7 +335,7 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       }
       TelegramUser* user = new TelegramUser;
       user->userID = u->id_;
-      user->fullName = u->first_name_ + " " + u->last_name_;
+      user->fullName = (u->last_name_ == "" ? u->first_name_ : (u->first_name_ + " " + u->last_name_));
       user->userName = u->username_;
       user->profilePicFileID = fileOriginID;
       user->bio = bio;
