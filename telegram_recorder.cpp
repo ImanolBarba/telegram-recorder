@@ -90,12 +90,14 @@ void TelegramRecorder::sendQuery(
   td_api::object_ptr<td_api::Function> func,
   std::function<void(TDAPIObjectPtr)> handler
 ) {
+  this->tdapiQueryMutex.lock();
   ++this->currentQueryID;
   SPDLOG_DEBUG("Sending query type {} with ID {}", func->get_id(), this->currentQueryID);
   if(handler) {
     this->handlers.emplace(this->currentQueryID, std::move(handler));
   }
   this->clientManager->send(this->clientID, this->currentQueryID, std::move(func));
+  this->tdapiQueryMutex.unlock();
 }
 
 void TelegramRecorder::processResponse(td::ClientManager::Response response) {

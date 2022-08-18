@@ -100,6 +100,7 @@ class TelegramRecorder {
     std::map<td_api::int53, std::vector<std::shared_ptr<td_api::message>>> toWriteMessageQueue;
     std::mutex toReadQueueMutex;
     std::mutex toWriteQueueMutex;
+    std::mutex tdapiQueryMutex;
     std::condition_variable messagesAvailableToWrite;
     ConfigParams config;
     sqlite3 *db;
