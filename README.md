@@ -56,7 +56,7 @@ How to build
 --
 You will need:
 - libconfig++-dev
-- libsdplog-dev
+- libspdlog-dev
 - libsqlite3-dev
 - libgtest-dev (Optional, only for unit tests)
 - libssl-dev 
