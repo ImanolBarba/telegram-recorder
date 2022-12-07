@@ -55,6 +55,7 @@ Besides this requirement, tgrec will try to "simulate" a normal human message re
 How to build
 --
 You will need:
+- g++
 - libconfig++-dev
 - libspdlog-dev
 - libsqlite3-dev
