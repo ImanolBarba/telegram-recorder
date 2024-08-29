@@ -37,6 +37,12 @@ double getMessageReadTime(std::shared_ptr<td_api::message>& message, ConfigParam
     return static_cast<double>(msgVideo.video_->duration_);
   } else if(message->content_->get_id() == td_api::messagePhoto::ID) {
     return config.humanParams.photoReadSpeedSec;
+  } else if(message->content_->get_id() == td_api::messageVoiceNote::ID) {
+    td_api::messageVoiceNote& voice = static_cast<td_api::messageVoiceNote&>(*message->content_);
+    return voice.voice_note_->duration_;
+  } else if(message->content_->get_id() == td_api::messageVideoNote::ID) {
+    td_api::messageVideoNote& video = static_cast<td_api::messageVideoNote&>(*message->content_);
+    return video.video_note_->duration_;
   }
   return 1.0;
 }

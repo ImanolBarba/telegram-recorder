@@ -101,6 +101,12 @@ td::td_api::file* getMessageContentFileReference(td_api::object_ptr<td_api::Mess
   } else if(content->get_id() == td_api::messageDocument::ID) {
     td_api::messageDocument& msgDoc = static_cast<td_api::messageDocument&>(*content);
     return msgDoc.document_->document_.get();
+  } else if (content->get_id() == td_api::messageVoiceNote::ID) {
+    td_api::messageVoiceNote& voice = static_cast<td_api::messageVoiceNote&>(*content);
+    return voice.voice_note_->voice_.get();
+  } else if (content->get_id() == td_api::messageVideoNote::ID) {
+    td_api::messageVideoNote& video = static_cast<td_api::messageVideoNote&>(*content);
+    return video.video_note_->video_.get();
   }
   return NULL;
 }
