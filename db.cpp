@@ -206,7 +206,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   statement += (fileOriginID == "" ? "NULL" : "'" + fileOriginID + "'") + ",";
   statement += std::to_string(message->chat_id_) + ",";
   statement += std::to_string(senderID) + ",";
-  statement += (message->reply_to_message_id_ ? ("'" + std::to_string(message->reply_in_chat_id_) + ":" + std::to_string(message->reply_to_message_id_) + "'") : "NULL") + ",";
+//  statement += (message->reply_to_message_id_ ? ("'" + std::to_string(message->reply_in_chat_id_) + ":" + std::to_string(message->reply_to_message_id_) + "'") : "NULL") + ",";
   statement += (origin == "" ? "NULL" : ("'" + origin + "'"));
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);

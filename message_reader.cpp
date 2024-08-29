@@ -101,7 +101,8 @@ void TelegramRecorder::markMessageAsRead(std::shared_ptr<td_api::message>& messa
   SPDLOG_DEBUG("Marking message {} from chat {} as read", message->id_, message->chat_id_);
   td_api::object_ptr<td::td_api::viewMessages> viewMessages = td_api::make_object<td_api::viewMessages>();
   viewMessages->chat_id_ = message->chat_id_;
-  viewMessages->message_thread_id_ = message->message_thread_id_;
+  // TODO
+//  viewMessages->message_thread_id_ = message->message_thread_id_;
   std::vector<td_api::int53> messages = {message->id_};
   viewMessages->message_ids_ = std::move(messages);
   this->sendQuery(std::move(viewMessages), checkAPICallSuccess("viewMessages"));

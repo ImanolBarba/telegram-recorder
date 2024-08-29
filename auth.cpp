@@ -21,6 +21,43 @@ auto TelegramRecorder::createAuthQueryHandler() {
   };
 }
 
+/**
+ *       func(static_cast<authorizationStateWaitTdlibParameters &>(obj));
+      return true;
+    case authorizationStateWaitPhoneNumber::ID:
+      func(static_cast<authorizationStateWaitPhoneNumber &>(obj));
+      return true;
+    case authorizationStateWaitEmailAddress::ID:
+      func(static_cast<authorizationStateWaitEmailAddress &>(obj));
+      return true;
+    case authorizationStateWaitEmailCode::ID:
+      func(static_cast<authorizationStateWaitEmailCode &>(obj));
+      return true;
+    case authorizationStateWaitCode::ID:
+      func(static_cast<authorizationStateWaitCode &>(obj));
+      return true;
+    case authorizationStateWaitOtherDeviceConfirmation::ID:
+      func(static_cast<authorizationStateWaitOtherDeviceConfirmation &>(obj));
+      return true;
+    case authorizationStateWaitRegistration::ID:
+      func(static_cast<authorizationStateWaitRegistration &>(obj));
+      return true;
+    case authorizationStateWaitPassword::ID:
+      func(static_cast<authorizationStateWaitPassword &>(obj));
+      return true;
+    case authorizationStateReady::ID:
+      func(static_cast<authorizationStateReady &>(obj));
+      return true;
+    case authorizationStateLoggingOut::ID:
+      func(static_cast<authorizationStateLoggingOut &>(obj));
+      return true;
+    case authorizationStateClosing::ID:
+      func(static_cast<authorizationStateClosing &>(obj));
+      return true;
+    case authorizationStateClosed::ID:
+      func(static_cast<authorizationStateClosed &>(obj));
+ */
+
 void TelegramRecorder::onAuthStateUpdate() {
   ++this->authQueryID;
   td_api::downcast_call(
@@ -52,10 +89,10 @@ void TelegramRecorder::onAuthStateUpdate() {
         );
       },
       [this](td_api::authorizationStateWaitRegistration &) {
-        this->sendQuery(
-          td_api::make_object<td_api::registerUser>(this->config.firstName, this->config.lastName),
-          this->createAuthQueryHandler()
-        );
+//        this->sendQuery(
+//          td_api::make_object<td_api::registerUser>(this->config.firstName, this->config.lastName),
+//          this->createAuthQueryHandler()
+//        );
       },
       [this](td_api::authorizationStateWaitPassword&) {
         std::cout << "Enter authentication password: " << std::flush;
@@ -77,21 +114,22 @@ void TelegramRecorder::onAuthStateUpdate() {
         std::getline(std::cin, phoneNumber);
         this->sendQuery(
           td_api::make_object<td_api::setAuthenticationPhoneNumber>(
-              phoneNumber, 
+              phoneNumber,
               nullptr
           ),
           this->createAuthQueryHandler()
         );
       },
-      [this](td_api::authorizationStateWaitEncryptionKey&) {
-        // Default to an empty key (at this point who cares lmao)
-        this->sendQuery(
-          td_api::make_object<td_api::checkDatabaseEncryptionKey>(""),
-          this->createAuthQueryHandler()
-        );
+      [this](td_api::authorizationStateWaitEmailAddress&) {
+          std::cout << "Enter email: " << std::flush;
+          // TODO
+      },
+      [this](td_api::authorizationStateWaitEmailCode&) {
+          std::cout << "Enter email: " << std::flush;
+          // TODO
       },
       [this](td_api::authorizationStateWaitTdlibParameters&) {
-        auto params = td_api::make_object<td_api::tdlibParameters>();
+        auto params = td_api::make_object<td_api::setTdlibParameters>();
         params->database_directory_ = "tdlib";
         params->use_message_database_ = true;
         params->use_secret_chats_ = true;
@@ -100,11 +138,11 @@ void TelegramRecorder::onAuthStateUpdate() {
         params->system_language_code_ = "en";
         params->device_model_ = "Desktop";
         params->application_version_ = "1.0";
-        params->enable_storage_optimizer_ = true;
         this->sendQuery(
-          td_api::make_object<td_api::setTdlibParameters>(std::move(params)),
+          td_api::make_object<td_api::setTdlibParameters>(std::move(*params)),
           this->createAuthQueryHandler()
         );
+          return true;
       }
     }
   );
