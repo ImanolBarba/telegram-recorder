@@ -338,7 +338,9 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       } else {
         td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
         std::string fileOrigin;
-        bio = ufi->bio_->text_;
+        if (ufi->bio_) {
+            bio = ufi->bio_->text_;
+        }
         if(u->profile_photo_ && u->profile_photo_->id_) {
           fileOrigin = std::to_string(u->id_);
           std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
