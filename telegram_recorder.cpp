@@ -19,7 +19,7 @@
 #include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
-std::string join(std::vector<std::string> vec, char separator = '.') {
+std::string join(std::vector<std::string>& vec, char separator = '.') {
     std::ostringstream o;
     auto cur = vec.begin();
     if (cur != vec.end()) {
@@ -349,12 +349,14 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       TelegramUser* user = new TelegramUser;
       user->userID = u->id_;
       user->fullName = (u->last_name_ == "" ? u->first_name_ : (u->first_name_ + " " + u->last_name_));
-      auto usernames = join(u->usernames_->active_usernames_);
-      auto disabled_usernames = join(u->usernames_->disabled_usernames_);
-      if (!disabled_usernames.empty())  {
-          usernames += "#" + disabled_usernames;
+      if (u->usernames_) {
+          auto usernames = join(u->usernames_->active_usernames_);
+          auto disabled_usernames = join(u->usernames_->disabled_usernames_);
+          if (!disabled_usernames.empty())  {
+              usernames += "#" + disabled_usernames;
+          }
+          user->userName = usernames;
       }
-      user->userName = usernames;
       user->profilePicFileID = fileOriginID;
       user->bio = bio;
       std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);
