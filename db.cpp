@@ -134,6 +134,10 @@ void TelegramRecorder::runDBWriter() {
       for(td_api::int53& chat : chats) {
         this->toWriteQueueMutex.lock();
         for(auto& message : this->toWriteMessageQueue[chat]) {
+          if (!message.get()) {
+            SPDLOG_ERROR("Empty message in chat {}", chat);
+            continue;
+          }
           this->writeMessageToDB(message);
         }
         this->toWriteMessageQueue.erase(chat);
@@ -206,7 +210,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   statement += (fileOriginID == "" ? "NULL" : "'" + fileOriginID + "'") + ",";
   statement += std::to_string(message->chat_id_) + ",";
   statement += std::to_string(senderID) + ",";
-  statement += (message->reply_to_ ? ("'" + std::to_string(message->reply_to_->get_id())  + "'") : "NULL") + ",";
+  statement += (message->reply_to_ ? ("'" + std::to_string(message->reply_to_)  + "'") : "NULL") + ",";
   statement += (origin == "" ? "NULL" : ("'" + origin + "'"));
   statement += ");";
   SPDLOG_DEBUG("Executing SQL: {}", statement);
