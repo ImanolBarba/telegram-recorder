@@ -213,7 +213,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
   std::string reply_to = "";
   if (message->reply_to_.get() && message->reply_to_->get_id() == td_api::messageReplyToMessage::ID) {
     auto& replied_on = static_cast<td_api::messageReplyToMessage&>(*message->reply_to_);
-    reply_to = std::to_string(replied_on.message_id_);
+    reply_to = std::to_string(replied_on.chat_id_) + ":" + std::to_string(replied_on.message_id_);
   }
   statement += (reply_to == "" ? "NULL" : ("'" + reply_to + "'")) + ",";
   statement += (origin == "" ? "NULL" : ("'" + origin + "'"));
