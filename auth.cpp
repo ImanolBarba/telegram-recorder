@@ -21,43 +21,6 @@ auto TelegramRecorder::createAuthQueryHandler() {
   };
 }
 
-/**
- *       func(static_cast<authorizationStateWaitTdlibParameters &>(obj));
-      return true;
-    case authorizationStateWaitPhoneNumber::ID:
-      func(static_cast<authorizationStateWaitPhoneNumber &>(obj));
-      return true;
-    case authorizationStateWaitEmailAddress::ID:
-      func(static_cast<authorizationStateWaitEmailAddress &>(obj));
-      return true;
-    case authorizationStateWaitEmailCode::ID:
-      func(static_cast<authorizationStateWaitEmailCode &>(obj));
-      return true;
-    case authorizationStateWaitCode::ID:
-      func(static_cast<authorizationStateWaitCode &>(obj));
-      return true;
-    case authorizationStateWaitOtherDeviceConfirmation::ID:
-      func(static_cast<authorizationStateWaitOtherDeviceConfirmation &>(obj));
-      return true;
-    case authorizationStateWaitRegistration::ID:
-      func(static_cast<authorizationStateWaitRegistration &>(obj));
-      return true;
-    case authorizationStateWaitPassword::ID:
-      func(static_cast<authorizationStateWaitPassword &>(obj));
-      return true;
-    case authorizationStateReady::ID:
-      func(static_cast<authorizationStateReady &>(obj));
-      return true;
-    case authorizationStateLoggingOut::ID:
-      func(static_cast<authorizationStateLoggingOut &>(obj));
-      return true;
-    case authorizationStateClosing::ID:
-      func(static_cast<authorizationStateClosing &>(obj));
-      return true;
-    case authorizationStateClosed::ID:
-      func(static_cast<authorizationStateClosed &>(obj));
- */
-
 void TelegramRecorder::onAuthStateUpdate() {
   ++this->authQueryID;
   td_api::downcast_call(
@@ -89,10 +52,7 @@ void TelegramRecorder::onAuthStateUpdate() {
         );
       },
       [this](td_api::authorizationStateWaitRegistration &) {
-//        this->sendQuery(
-//          td_api::make_object<td_api::registerUser>(this->config.firstName, this->config.lastName),
-//          this->createAuthQueryHandler()
-//        );
+        std::cout << "Unimplemented authorizationStateWaitRegistration" << std::flush;
       },
       [this](td_api::authorizationStateWaitPassword&) {
         std::cout << "Enter authentication password: " << std::flush;
@@ -121,12 +81,10 @@ void TelegramRecorder::onAuthStateUpdate() {
         );
       },
       [this](td_api::authorizationStateWaitEmailAddress&) {
-          std::cout << "Enter email: " << std::flush;
-          // TODO
+          std::cout << "Unimplemented authorizationStateWaitEmailAddress" << std::flush;
       },
       [this](td_api::authorizationStateWaitEmailCode&) {
-          std::cout << "Enter email: " << std::flush;
-          // TODO
+          std::cout << "Unimplemented authorizationStateWaitEmailCode" << std::flush;
       },
       [this](td_api::authorizationStateWaitTdlibParameters&) {
         auto params = td_api::make_object<td_api::setTdlibParameters>();
