@@ -352,12 +352,10 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       user->userID = u->id_;
       user->fullName = (u->last_name_ == "" ? u->first_name_ : (u->first_name_ + " " + u->last_name_));
       if (u->usernames_) {
-          auto usernames = join(u->usernames_->active_usernames_);
-          auto disabled_usernames = join(u->usernames_->disabled_usernames_);
-          if (!disabled_usernames.empty())  {
-              usernames += "#" + disabled_usernames;
-          }
-          user->userName = usernames;
+        // First username is the active username
+        user->activeUserName = u->usernames_->active_usernames_[0];
+        user->userNames = join(u->usernames_->active_usernames_);
+        user->disabledUserNames = join(u->usernames_->disabled_usernames_);
       }
       user->profilePicFileID = fileOriginID;
       user->bio = bio;

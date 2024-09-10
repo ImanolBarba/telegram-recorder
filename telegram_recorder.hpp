@@ -36,7 +36,9 @@ template<class... Ts> overload(Ts...) -> overload<Ts...>;
 typedef struct TelegramUser {
   td_api::int53 userID;
   std::string fullName;
-  std::string userName;
+  std::string activeUserName;
+  std::string userNames;
+  std::string disabledUserNames;
   std::string bio;
   std::string profilePicFileID;
 } TelegramUser;

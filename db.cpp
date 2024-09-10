@@ -72,6 +72,8 @@ bool TelegramRecorder::initDB() {
                               "user_id INTEGER PRIMARY KEY,"
                               "fullname TEXT,"
                               "username TEXT,"
+                              "usernames TEXT,"
+                              "disabled_usernames TEXT,"
                               "bio TEXT,"
                               "profile_pic_file_id TEXT"
                             ");";
@@ -262,7 +264,7 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
 }
 
 std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53 userID) {
-  std::string statement = "SELECT fullname, username, bio, profile_pic_file_id FROM users WHERE user_id='" + std::to_string(userID) + "';";
+  std::string statement = "SELECT fullname, username, usernames, disabled_usernames, bio, profile_pic_file_id FROM users WHERE user_id='" + std::to_string(userID) + "';";
   char *errMsg = NULL;
   int rc;
   TelegramUser *user = NULL;
@@ -281,9 +283,11 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
     user = new TelegramUser;
     user->userID = userID;
     user->fullName = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
-    user->userName = sqlite3_column_text(stmt, 1) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1))) : "";
-    user->bio = sqlite3_column_text(stmt, 2) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))) : "";
-    user->profilePicFileID = sqlite3_column_int(stmt, 3);
+    user->activeUserName = sqlite3_column_text(stmt, 1) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1))) : ""; 
+    user->userNames = sqlite3_column_text(stmt, 2) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))) : "";
+    user->disabledUserNames = sqlite3_column_text(stmt, 3) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))) : "";
+    user->bio = sqlite3_column_text(stmt, 4) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4))) : "";
+    user->profilePicFileID = sqlite3_column_int(stmt, 5);
   }
   if (rc != SQLITE_DONE) {
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
@@ -302,13 +306,17 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
                             "user_id,"
                             "fullname,"
                             "username,"
+                            "usernames,"
+                            "disabled_usernames,"
                             "bio,"
                             "profile_pic_file_id"
                           ") VALUES "
                           "(";
   statement += std::to_string(user->userID) + ",";
   statement += "'" + user->fullName + "',";
-  statement += (user->userName == "" ? "NULL" : "'" + user->userName + "'") + ",";
+  statement += (user->activeUserName == "" ? "NULL" : "'" + user->activeUserName + "'") + ",";
+  statement += (user->userNames == "" ? "NULL" : "'" + user->userNames + "'") + ",";
+  statement += (user->disabledUserNames == "" ? "NULL" : "'" + user->disabledUserNames + "'") + ",";
   statement += (user->bio == "" ? "NULL" : "'" + user->bio + "'") + ",";
   statement += (user->profilePicFileID == "" ? "NULL" : "'" + user->profilePicFileID + "'");
   statement += ");";
