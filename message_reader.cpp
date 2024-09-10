@@ -31,12 +31,18 @@ unsigned int getNumberOfWordsInString(std::string& text) {
 double getMessageReadTime(std::shared_ptr<td_api::message>& message, ConfigParams& config) {
   if(message->content_->get_id() == td_api::messageText::ID) {
     td_api::messageText& msgText = static_cast<td_api::messageText&>(*message->content_);
-    return getNumberOfWordsInString(msgText.text_->text_) * (config.humanParams.textReadSpeedWPM/60.0);
+    return getNumberOfWordsInString(msgText.text_->text_) * 60 / config.humanParams.textReadSpeedWPM;
   } else if(message->content_->get_id() == td_api::messageVideo::ID) {
     td_api::messageVideo& msgVideo = static_cast<td_api::messageVideo&>(*message->content_);
     return static_cast<double>(msgVideo.video_->duration_);
   } else if(message->content_->get_id() == td_api::messagePhoto::ID) {
     return config.humanParams.photoReadSpeedSec;
+  } else if(message->content_->get_id() == td_api::messageVoiceNote::ID) {
+    td_api::messageVoiceNote& voice = static_cast<td_api::messageVoiceNote&>(*message->content_);
+    return voice.voice_note_->duration_;
+  } else if(message->content_->get_id() == td_api::messageVideoNote::ID) {
+    td_api::messageVideoNote& video = static_cast<td_api::messageVideoNote&>(*message->content_);
+    return video.video_note_->duration_;
   }
   return 1.0;
 }
@@ -101,7 +107,6 @@ void TelegramRecorder::markMessageAsRead(std::shared_ptr<td_api::message>& messa
   SPDLOG_DEBUG("Marking message {} from chat {} as read", message->id_, message->chat_id_);
   td_api::object_ptr<td::td_api::viewMessages> viewMessages = td_api::make_object<td_api::viewMessages>();
   viewMessages->chat_id_ = message->chat_id_;
-  viewMessages->message_thread_id_ = message->message_thread_id_;
   std::vector<td_api::int53> messages = {message->id_};
   viewMessages->message_ids_ = std::move(messages);
   this->sendQuery(std::move(viewMessages), checkAPICallSuccess("viewMessages"));

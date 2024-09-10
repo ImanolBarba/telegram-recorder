@@ -52,10 +52,7 @@ void TelegramRecorder::onAuthStateUpdate() {
         );
       },
       [this](td_api::authorizationStateWaitRegistration &) {
-        this->sendQuery(
-          td_api::make_object<td_api::registerUser>(this->config.firstName, this->config.lastName),
-          this->createAuthQueryHandler()
-        );
+        std::cout << "Unimplemented authorizationStateWaitRegistration" << std::flush;
       },
       [this](td_api::authorizationStateWaitPassword&) {
         std::cout << "Enter authentication password: " << std::flush;
@@ -77,21 +74,20 @@ void TelegramRecorder::onAuthStateUpdate() {
         std::getline(std::cin, phoneNumber);
         this->sendQuery(
           td_api::make_object<td_api::setAuthenticationPhoneNumber>(
-              phoneNumber, 
+              phoneNumber,
               nullptr
           ),
           this->createAuthQueryHandler()
         );
       },
-      [this](td_api::authorizationStateWaitEncryptionKey&) {
-        // Default to an empty key (at this point who cares lmao)
-        this->sendQuery(
-          td_api::make_object<td_api::checkDatabaseEncryptionKey>(""),
-          this->createAuthQueryHandler()
-        );
+      [this](td_api::authorizationStateWaitEmailAddress&) {
+          std::cout << "Unimplemented authorizationStateWaitEmailAddress" << std::flush;
+      },
+      [this](td_api::authorizationStateWaitEmailCode&) {
+          std::cout << "Unimplemented authorizationStateWaitEmailCode" << std::flush;
       },
       [this](td_api::authorizationStateWaitTdlibParameters&) {
-        auto params = td_api::make_object<td_api::tdlibParameters>();
+        auto params = td_api::make_object<td_api::setTdlibParameters>();
         params->database_directory_ = "tdlib";
         params->use_message_database_ = true;
         params->use_secret_chats_ = true;
@@ -100,11 +96,11 @@ void TelegramRecorder::onAuthStateUpdate() {
         params->system_language_code_ = "en";
         params->device_model_ = "Desktop";
         params->application_version_ = "1.0";
-        params->enable_storage_optimizer_ = true;
         this->sendQuery(
-          td_api::make_object<td_api::setTdlibParameters>(std::move(params)),
+          td_api::make_object<td_api::setTdlibParameters>(std::move(*params)),
           this->createAuthQueryHandler()
         );
+          return true;
       }
     }
   );

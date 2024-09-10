@@ -19,6 +19,17 @@
 #include "telegram_data.hpp"
 #include "telegram_recorder.hpp"
 
+std::string join(std::vector<std::string>& vec, char separator = '.') {
+    std::ostringstream o;
+    auto cur = vec.begin();
+    if (cur != vec.end()) {
+        o << *cur++;
+        for (; cur != vec.end(); ++cur)
+            o << separator << *cur;
+    }
+    return o.str();
+}
+
 TelegramRecorder::TelegramRecorder() {
     td::ClientManager::execute(td_api::make_object<td_api::setLogVerbosityLevel>(2));
     this->clientManager = std::make_unique<td::ClientManager>();
@@ -327,7 +338,9 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       } else {
         td::tl::unique_ptr<td_api::userFullInfo> ufi = td::move_tl_object_as<td_api::userFullInfo>(object);
         std::string fileOrigin;
-        bio = ufi->bio_;
+        if (ufi->bio_) {
+            bio = ufi->bio_->text_;
+        }
         if(u->profile_photo_ && u->profile_photo_->id_) {
           fileOrigin = std::to_string(u->id_);
           std::string fileIDStr = std::to_string(u->profile_photo_->big_->id_)  + ":" + fileOrigin;
@@ -338,7 +351,14 @@ void TelegramRecorder::retrieveAndWriteUserFromTelegram(td_api::int53 userID) {
       TelegramUser* user = new TelegramUser;
       user->userID = u->id_;
       user->fullName = (u->last_name_ == "" ? u->first_name_ : (u->first_name_ + " " + u->last_name_));
-      user->userName = u->username_;
+      if (u->usernames_) {
+          auto usernames = join(u->usernames_->active_usernames_);
+          auto disabled_usernames = join(u->usernames_->disabled_usernames_);
+          if (!disabled_usernames.empty())  {
+              usernames += "#" + disabled_usernames;
+          }
+          user->userName = usernames;
+      }
       user->profilePicFileID = fileOriginID;
       user->bio = bio;
       std::unique_ptr<TelegramUser> userPtr = std::unique_ptr<TelegramUser>(user);

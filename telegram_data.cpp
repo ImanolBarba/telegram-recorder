@@ -58,20 +58,17 @@ std::string getMessageText(std::shared_ptr<td_api::message>& message) {
 
 std::string getMessageOrigin(std::shared_ptr<td_api::message>& message) {
   if(message->forward_info_) {
-    if (message->forward_info_->origin_->get_id() == td_api::messageForwardOriginChannel::ID) {
-      td_api::object_ptr<td_api::messageForwardOriginChannel> orig = td::move_tl_object_as<td_api::messageForwardOriginChannel>(message->forward_info_->origin_);
+    if (message->forward_info_->origin_->get_id() == td_api::messageOriginChannel::ID) {
+      td_api::object_ptr<td_api::messageOriginChannel> orig = td::move_tl_object_as<td_api::messageOriginChannel>(message->forward_info_->origin_);
       return std::to_string(orig->chat_id_) + ":" + std::to_string(orig->message_id_);
-    } else if(message->forward_info_->origin_->get_id() == td_api::messageForwardOriginChat::ID) {
-      td_api::object_ptr<td_api::messageForwardOriginChat> orig = td::move_tl_object_as<td_api::messageForwardOriginChat>(message->forward_info_->origin_);
+    } else if(message->forward_info_->origin_->get_id() == td_api::messageOriginChat::ID) {
+      td_api::object_ptr<td_api::messageOriginChat> orig = td::move_tl_object_as<td_api::messageOriginChat>(message->forward_info_->origin_);
       return std::to_string(orig->sender_chat_id_);
-    } else if(message->forward_info_->origin_->get_id() == td_api::messageForwardOriginHiddenUser::ID) {
-      td_api::object_ptr<td_api::messageForwardOriginHiddenUser> orig = td::move_tl_object_as<td_api::messageForwardOriginHiddenUser>(message->forward_info_->origin_);
+    } else if(message->forward_info_->origin_->get_id() == td_api::messageOriginHiddenUser::ID) {
+      td_api::object_ptr<td_api::messageOriginHiddenUser> orig = td::move_tl_object_as<td_api::messageOriginHiddenUser>(message->forward_info_->origin_);
       return orig->sender_name_;
-    } else if(message->forward_info_->origin_->get_id() == td_api::messageForwardOriginMessageImport::ID) {
-      td_api::object_ptr<td_api::messageForwardOriginMessageImport> orig = td::move_tl_object_as<td_api::messageForwardOriginMessageImport>(message->forward_info_->origin_);
-      return orig->sender_name_;
-    } else if(message->forward_info_->origin_->get_id() == td_api::messageForwardOriginUser::ID) {
-      td_api::object_ptr<td_api::messageForwardOriginUser> orig = td::move_tl_object_as<td_api::messageForwardOriginUser>(message->forward_info_->origin_);
+    } else if(message->forward_info_->origin_->get_id() == td_api::messageOriginUser::ID) {
+      td_api::object_ptr<td_api::messageOriginUser> orig = td::move_tl_object_as<td_api::messageOriginUser>(message->forward_info_->origin_);
       return std::to_string(orig->sender_user_id_);
     }
   }
@@ -104,6 +101,12 @@ td::td_api::file* getMessageContentFileReference(td_api::object_ptr<td_api::Mess
   } else if(content->get_id() == td_api::messageDocument::ID) {
     td_api::messageDocument& msgDoc = static_cast<td_api::messageDocument&>(*content);
     return msgDoc.document_->document_.get();
+  } else if (content->get_id() == td_api::messageVoiceNote::ID) {
+    td_api::messageVoiceNote& voice = static_cast<td_api::messageVoiceNote&>(*content);
+    return voice.voice_note_->voice_.get();
+  } else if (content->get_id() == td_api::messageVideoNote::ID) {
+    td_api::messageVideoNote& video = static_cast<td_api::messageVideoNote&>(*content);
+    return video.video_note_->video_.get();
   }
   return NULL;
 }
