@@ -14,7 +14,7 @@
 #include "telegram_recorder.hpp"
 
 bool checkTableExists(sqlite3* db, std::string tableName) {
-  std::string statement = "SELECT COUNT(type) FROM sqlite_master WHERE type='table' AND name='" + tableName + "';";
+  std::string statement = "SELECT COUNT(type) FROM sqlite_master WHERE type='table' AND name = ? ;";
   char *errMsg = NULL;
   int rc;
   bool exists = false;
@@ -25,6 +25,13 @@ bool checkTableExists(sqlite3* db, std::string tableName) {
     SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
     return false;
   }
+
+  rc = sqlite3_bind_text64(stmt, 1, tableName.c_str(), tableName.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     if(sqlite3_column_int(stmt, 0)) {
@@ -56,7 +63,7 @@ bool TelegramRecorder::initDB() {
                               "chat_id INTEGER,"
                               "sender_id INTEGER,"
                               "in_reply_of TEXT,"
-                              "forwarded_from INTEGER"
+                              "forwarded_from TEXT"
                             ");"
                             "CREATE INDEX from_sender_in_chat ON messages (sender_id, chat_id);";
     SPDLOG_DEBUG("Executing SQL: {}", statement);
@@ -204,22 +211,67 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
                             "in_reply_of,"
                             "forwarded_from"
                           ") VALUES "
-                          "(";
-  statement += "'" + compoundMessageID + "',";
-  statement += std::to_string(message->date_) + ",";
-  statement += "'" + text + "',";
-  statement += std::to_string(msgType) + ",";
-  statement += (fileOriginID == "" ? "NULL" : "'" + fileOriginID + "'") + ",";
-  statement += std::to_string(message->chat_id_) + ",";
-  statement += std::to_string(senderID) + ",";
-  std::string reply_to = "";
+                          "( ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  
+  rc = sqlite3_bind_text64(stmt, 1, compoundMessageID.c_str(), compoundMessageID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_int64(stmt, 2, message->date_);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_text64(stmt, 3, text.c_str(), text.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_int(stmt, 4, msgType);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string contentFileID = (fileOriginID == "" ? "NULL" : fileOriginID);
+  rc = sqlite3_bind_text64(stmt, 5, contentFileID.c_str(), contentFileID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_int64(stmt, 6, message->chat_id_);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_int64(stmt, 7, senderID);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string reply_to = "NULL";
   if (message->reply_to_.get() && message->reply_to_->get_id() == td_api::messageReplyToMessage::ID) {
     auto& replied_on = static_cast<td_api::messageReplyToMessage&>(*message->reply_to_);
     reply_to = std::to_string(replied_on.chat_id_) + ":" + std::to_string(replied_on.message_id_);
   }
-  statement += (reply_to == "" ? "NULL" : ("'" + reply_to + "'")) + ",";
-  statement += (origin == "" ? "NULL" : ("'" + origin + "'"));
-  statement += ");";
+  rc = sqlite3_bind_text64(stmt, 8, reply_to.c_str(), reply_to.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_text64(stmt, 9, origin.c_str(), origin.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   rc = sqlite3_exec(this->db, statement.c_str(), 0, 0, &errMsg);
@@ -232,7 +284,7 @@ bool TelegramRecorder::writeMessageToDB(std::shared_ptr<td_api::message>& messag
 }
 
 std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53 chatID) {
-  std::string statement = "SELECT name, group_id, about, pic_file_id FROM chats WHERE chat_id='" + std::to_string(chatID) + "';";
+  std::string statement = "SELECT name, group_id, about, pic_file_id FROM chats WHERE chat_id = ? ;";
   char *errMsg = NULL;
   int rc;
   TelegramChat *chat = NULL;
@@ -245,6 +297,12 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
       SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
       return std::unique_ptr<TelegramChat>(chat);
   }
+
+  rc = sqlite3_bind_int64(stmt, 1, chatID);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return nullptr;
+  }
   SPDLOG_DEBUG("Executing SQL: {}", statement);
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     exists = true;
@@ -253,7 +311,7 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
     chat->name = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
     chat->groupID = sqlite3_column_int(stmt, 1);
     chat->about = sqlite3_column_text(stmt, 2) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))) : "";
-    chat->profilePicFileID = sqlite3_column_int(stmt, 3);
+    chat->profilePicFileID = sqlite3_column_text(stmt, 3) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))) : "";;
   }
   if (rc != SQLITE_DONE) {
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
@@ -264,7 +322,7 @@ std::unique_ptr<TelegramChat> TelegramRecorder::retrieveChatFromDB(td_api::int53
 }
 
 std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53 userID) {
-  std::string statement = "SELECT fullname, username, usernames, disabled_usernames, bio, profile_pic_file_id FROM users WHERE user_id='" + std::to_string(userID) + "';";
+  std::string statement = "SELECT fullname, username, usernames, disabled_usernames, bio, profile_pic_file_id FROM users WHERE user_id = ? ;";
   char *errMsg = NULL;
   int rc;
   TelegramUser *user = NULL;
@@ -277,6 +335,13 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
       SPDLOG_ERROR("Error preparing statement: {}", sqlite3_errmsg(db));
       return std::unique_ptr<TelegramUser>(user);
   }
+
+  rc = sqlite3_bind_int64(stmt, 1, userID);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return nullptr;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     exists = true;
@@ -287,7 +352,7 @@ std::unique_ptr<TelegramUser> TelegramRecorder::retrieveUserFromDB(td_api::int53
     user->userNames = sqlite3_column_text(stmt, 2) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))) : "";
     user->disabledUserNames = sqlite3_column_text(stmt, 3) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))) : "";
     user->bio = sqlite3_column_text(stmt, 4) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4))) : "";
-    user->profilePicFileID = sqlite3_column_int(stmt, 5);
+    user->profilePicFileID = sqlite3_column_text(stmt, 5) ? std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5))) : "";
   }
   if (rc != SQLITE_DONE) {
     SPDLOG_ERROR("Error executing SQL: {}", sqlite3_errmsg(db));
@@ -311,15 +376,56 @@ bool TelegramRecorder::writeUserToDB(std::unique_ptr<TelegramUser>& user) {
                             "bio,"
                             "profile_pic_file_id"
                           ") VALUES "
-                          "(";
-  statement += std::to_string(user->userID) + ",";
-  statement += "'" + user->fullName + "',";
-  statement += (user->activeUserName == "" ? "NULL" : "'" + user->activeUserName + "'") + ",";
-  statement += (user->userNames == "" ? "NULL" : "'" + user->userNames + "'") + ",";
-  statement += (user->disabledUserNames == "" ? "NULL" : "'" + user->disabledUserNames + "'") + ",";
-  statement += (user->bio == "" ? "NULL" : "'" + user->bio + "'") + ",";
-  statement += (user->profilePicFileID == "" ? "NULL" : "'" + user->profilePicFileID + "'");
-  statement += ");";
+                          "(?, ?, ?, ?, ?, ?, ?);";
+  
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  
+  rc = sqlite3_bind_int64(stmt, 1, user->userID);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_text64(stmt, 2, user->fullName.c_str(), user->fullName.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string activeUserName = (user->activeUserName == "" ? "NULL" : user->activeUserName);
+  rc = sqlite3_bind_text64(stmt, 3, activeUserName.c_str(), activeUserName.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string userNames = (user->userNames == "" ? "NULL" : user->userNames);
+  rc = sqlite3_bind_text64(stmt, 4, userNames.c_str(), userNames.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string disabledUserNames = (user->disabledUserNames == "" ? "NULL" : user->disabledUserNames);
+  rc = sqlite3_bind_text64(stmt, 5, disabledUserNames.c_str(), disabledUserNames.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string bio = (user->bio == "" ? "NULL" : user->bio);
+  rc = sqlite3_bind_text64(stmt, 6, bio.c_str(), bio.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string profilePicFileID = (user->profilePicFileID == "" ? "NULL" : user->profilePicFileID);
+  rc = sqlite3_bind_text64(stmt, 7, profilePicFileID.c_str(), profilePicFileID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();
@@ -345,13 +451,48 @@ bool TelegramRecorder::writeChatToDB(std::unique_ptr<TelegramChat>& chat) {
                             "about,"
                             "pic_file_id"
                           ") VALUES "
-                          "(";
-  statement += std::to_string(chat->chatID) + ",";
-  statement += (chat->groupID ? std::to_string(chat->groupID) : "NULL") + ",";
-  statement += "'" + chat->name + "',";
-  statement += (chat->about == "" ? "NULL" : "'" + chat->about + "'") + ",";
-  statement += (chat->profilePicFileID == "" ? "NULL" : "'" + chat->profilePicFileID + "'");
-  statement += ");";
+                          "(?, ?, ?, ?, ?);";
+  
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  
+  rc = sqlite3_bind_int64(stmt, 1, chat->chatID);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  if (!chat->groupID) {
+    rc = sqlite3_bind_null(stmt, 2);
+  } else {
+    rc = sqlite3_bind_int64(stmt, 2, chat->groupID);
+  }
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
+  rc = sqlite3_bind_text64(stmt, 3, chat->name.c_str(), chat->name.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string about = (chat->about == "" ? "NULL" : chat->about);
+  rc = sqlite3_bind_text64(stmt, 4, about.c_str(), about.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  std::string profilePicFileID = (chat->profilePicFileID == "" ? "NULL" : chat->profilePicFileID);
+  rc = sqlite3_bind_text64(stmt, 5, profilePicFileID.c_str(), profilePicFileID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();
@@ -375,11 +516,31 @@ bool TelegramRecorder::writeFileToDB(std::string& fileID, std::string& downloade
                             "downloaded_as,"
                             "origin_id"
                           ") VALUES "
-                          "(";
-  statement += "'" + fileID + "',";
-  statement += "'" + downloadedAs + "',";
-  statement += "'" + originID + "'";
-  statement += ");";
+                          "(?, ?, ?);";
+
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
+  rc = sqlite3_bind_text64(stmt, 1, fileID.c_str(), fileID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_text64(stmt, 2, downloadedAs.c_str(), downloadedAs.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_text64(stmt, 3, originID.c_str(), originID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();
@@ -415,7 +576,31 @@ void TelegramRecorder::updateMessageText(td_api::int53 chatID, td_api::int53 mes
     int rc;
     char* errMsg = NULL;
 
-    std::string statement = "UPDATE messages SET message = '" + newText + "', timestamp = " + std::to_string(editDate) + " WHERE id = '" + compoundMessageID + "';";
+    std::string statement = "UPDATE messages SET message = ?, timestamp = ? WHERE id = ?;";
+
+    sqlite3_stmt *stmt;
+    rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+      SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+      return;
+    }
+
+    rc = sqlite3_bind_text64(stmt, 1, newText.c_str(), newText.length(), SQLITE_STATIC, SQLITE_UTF8);
+    if (rc != SQLITE_OK) {
+      SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+      return;
+    }
+    rc = sqlite3_bind_int64(stmt, 2, editDate);
+    if (rc != SQLITE_OK) {
+      SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+      return;
+    }
+    rc = sqlite3_bind_text64(stmt, 3, compoundMessageID.c_str(), compoundMessageID.length(), SQLITE_STATIC, SQLITE_UTF8);
+    if (rc != SQLITE_OK) {
+      SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+      return;
+    }
+
     SPDLOG_DEBUG("Executing SQL: {}", statement);
 
     this->toWriteQueueMutex.lock();
@@ -449,7 +634,32 @@ bool TelegramRecorder::updateMessageContent(std::string compoundMessageID, td_ap
   int rc;
   char* errMsg = NULL;
 
-  std::string statement = "UPDATE messages SET content_file_id = '" + fileOriginID + "', timestamp = " + std::to_string(editDate) + " WHERE id = '" + compoundMessageID + "';";
+  
+  std::string statement = "UPDATE messages SET content_file_id = ?, timestamp = ? WHERE id = ?;";
+
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
+  rc = sqlite3_bind_text64(stmt, 1, fileOriginID.c_str(), fileOriginID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_int64(stmt, 2, editDate);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_text64(stmt, 3, compoundMessageID.c_str(), compoundMessageID.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();
@@ -488,7 +698,26 @@ bool TelegramRecorder::updateGroupData(TDAPIObjectPtr groupData, td_api::int53 g
     return false;
   }
 
-  std::string statement = "UPDATE chats SET about = '" + description + "' WHERE group_id = " + std::to_string(groupID) + ";";
+  std::string statement = "UPDATE chats SET about = ? WHERE group_id = ?;";
+
+  sqlite3_stmt *stmt;
+  rc = sqlite3_prepare_v2(db, statement.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
+  rc = sqlite3_bind_text64(stmt, 1, description.c_str(), description.length(), SQLITE_STATIC, SQLITE_UTF8);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+  rc = sqlite3_bind_int64(stmt, 2, groupID);
+  if (rc != SQLITE_OK) {
+    SPDLOG_ERROR("Error preparing SQL statement: {}", sqlite3_errmsg(db));
+    return false;
+  }
+
   SPDLOG_DEBUG("Executing SQL: {}", statement);
 
   this->toWriteQueueMutex.lock();
