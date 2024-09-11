@@ -22,22 +22,12 @@
 
 #define VERSION "1.0"
 
-volatile sig_atomic_t signalReceived = 0;
-
-// Semaphores are one of the few appropriate sync mechanisms that are async-signal-safe
-sem_t signalSemaphore;
-
 static struct option longopts[] = {
     { "verbose",  no_argument,  NULL, 'v'},
     { "help",     no_argument,  NULL, 'h'},
     { "version",  no_argument,  NULL, 'V'},
     { NULL,       0,            NULL, 0  }
 };
-
-void signalHandler(int signal) {
-  signalReceived = signal;
-  sem_post(&signalSemaphore);
-}
 
 void printVersion(const char* argv) {
     std::cout << argv << " " << VERSION << std::endl;
@@ -57,18 +47,6 @@ int main(int argc, char** argv) {
   spdlog::set_pattern("%l - %Y-%m-%d %H:%M:%S %z [%s:%# %!() TID:%t] %^%v%$");
   spdlog::sinks::daily_file_sink_mt* fileSink = new spdlog::sinks::daily_file_sink_mt("tgrec.log", 0, 0);
   spdlog::default_logger_raw()->sinks().push_back(std::shared_ptr<spdlog::sinks::daily_file_sink_mt>(fileSink));
-
-  if (sem_init(&signalSemaphore, 0, 0)) {
-    SPDLOG_ERROR("Unable to initialise semaphore: {}", std::strerror(errno));
-    return 1;
-  }
-
-  struct sigaction newAction;
-  newAction.sa_handler = signalHandler;
-  sigemptyset(&newAction.sa_mask);
-  newAction.sa_flags = 0;
-  sigaction(SIGINT, &newAction, NULL);
-  sigaction(SIGTERM, &newAction, NULL);
 
   int longIndex = 0;
   int c;
@@ -99,25 +77,17 @@ int main(int argc, char** argv) {
   TelegramRecorder recorder;
   recorder.start();
 
-  while(true) {
-    if(sem_wait(&signalSemaphore)) {
-      if(errno != EINTR) {
-        // EINTR will be triggered when receiving a signal, so if not that, it's bad
-        SPDLOG_ERROR("Error waiting for signal semaphore: {}", std::strerror(errno));
-        return 1;
-      }
-    } else {
-      break;
-    }
-  }
+  // Block SIGINT and SIGTERM from executing the default disposition (terminate)
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGINT);
+  sigaddset(&sigset, SIGTERM);
+  sigprocmask(SIG_BLOCK, &sigset, NULL);
 
-  if(sem_destroy(&signalSemaphore)) {
-    SPDLOG_ERROR("Error destroying signal semaphore: {}", std::strerror(errno));
-    return 1;
-  }
-
-  if(signalReceived) {
-    SPDLOG_INFO("Caught signal {}", signalReceived);
+  // Wait until one of the signals is pending (generated but not delivered)
+  int sig;
+  if(sigwait(&sigset, &sig)) {
+    SPDLOG_ERROR("Error calling sigwait: {}",  strerror(errno));
   }
 
   SPDLOG_INFO("Stopping Telegram Recorder...");
